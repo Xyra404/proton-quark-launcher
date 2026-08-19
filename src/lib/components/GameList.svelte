@@ -36,24 +36,82 @@
   let popoverOpenForGame = $state<string | null>(null);
   let popoverX = $state(0);
   let popoverY = $state(0);
+  let popoverEl = $state<HTMLElement | null>(null);
+  let activeBtn = $state<HTMLElement | null>(null);
+
+  function repositionPopover() {
+    if (!popoverEl || !activeBtn) return;
+    const rect = activeBtn.getBoundingClientRect();
+    const popWidth = popoverEl.offsetWidth || 200;
+    const popHeight = popoverEl.offsetHeight || 220;
+
+    let x = rect.right - popWidth;
+    if (x < 12) x = 12;
+    if (x + popWidth > window.innerWidth - 12) {
+      x = window.innerWidth - popWidth - 12;
+    }
+
+    let y = rect.bottom + 8;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+
+    if (spaceBelow < popHeight + 12 && spaceAbove > spaceBelow) {
+      y = rect.top - popHeight - 8;
+    }
+
+    if (y < 12) y = 12;
+    if (y + popHeight > window.innerHeight - 12) {
+      y = Math.max(12, window.innerHeight - popHeight - 12);
+    }
+
+    popoverX = Math.round(x);
+    popoverY = Math.round(y);
+  }
 
   function openPopover(e: MouseEvent, gameId: string) {
     const btn = e.currentTarget as HTMLElement;
-    const rect = btn.getBoundingClientRect();
-    popoverX = rect.left - 180; // approximate width offset
-    popoverY = rect.bottom + 8;
+    activeBtn = btn;
     popoverOpenForGame = gameId;
+
+    const rect = btn.getBoundingClientRect();
+    let x = rect.right - 200;
+    if (x < 12) x = 12;
+    let y = rect.bottom + 8;
+    if (y + 220 > window.innerHeight - 12 && rect.top > window.innerHeight - rect.bottom) {
+      y = rect.top - 228;
+    }
+    popoverX = Math.round(x);
+    popoverY = Math.round(y);
   }
 
   function closePopover() {
     popoverOpenForGame = null;
+    activeBtn = null;
   }
+
+  $effect(() => {
+    if (popoverOpenForGame && popoverEl) {
+      repositionPopover();
+    }
+  });
 
   function handleWindowClick(e: MouseEvent) {
     if (!popoverOpenForGame) return;
     const target = e.target as HTMLElement;
     if (!target.closest('.collection-popover') && !target.closest('.btn-col')) {
       closePopover();
+    }
+  }
+
+  function handleWindowScroll() {
+    if (popoverOpenForGame) {
+      closePopover();
+    }
+  }
+
+  function handleWindowResize() {
+    if (popoverOpenForGame) {
+      repositionPopover();
     }
   }
 
@@ -214,7 +272,7 @@
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onscroll={handleWindowScroll} onresize={handleWindowResize} />
 
 <div class="game-list-root">
   <div class="list-header">
@@ -343,6 +401,7 @@
 <!-- Collection Popover -->
 {#if popoverOpenForGame}
   <div
+    bind:this={popoverEl}
     class="collection-popover"
     style="left: {popoverX}px; top: {popoverY}px;"
   >
