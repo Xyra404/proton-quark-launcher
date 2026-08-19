@@ -70,6 +70,7 @@
   }
 
   :global(html), :global(body) {
+    color-scheme: dark;
     margin: 0;
     padding: 0;
     height: 100%;

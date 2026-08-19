@@ -1,0 +1,115 @@
+name: Build Linux Release
+
+# Fires only when a pull request targeting `main` is merged, and only if
+# that PR's source branch was `dev`. This is the standard, robust way to
+# detect "dev merged into main" — a plain `push: branches: [main]` trigger
+# would also fire on direct pushes, hotfix PRs, etc.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  build-linux:
+    # Only proceed if the PR was actually merged (not just closed) and the
+    # source branch was dev. This condition is what scopes the whole job.
+    if: >
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'dev'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout main (post-merge)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Ubuntu 22.04 is the minimum baseline glibc target Tauri v2
+      # recommends for maximum Linux compatibility of the AppImage.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            patchelf
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # tauri.conf.json's top-level "version" field accepts either a literal
+      # semver string OR a path to a package.json to read from. This step
+      # explicitly copies package.json's version into tauri.conf.json before
+      # the build, so package.json stays the single source of truth and you
+      # never have to hand-edit tauri.conf.json when bumping versions.
+      - name: Sync version from package.json into tauri.conf.json
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "Syncing version: $PKG_VERSION"
+          jq --arg v "$PKG_VERSION" '.version = $v' \
+            src-tauri/tauri.conf.json > src-tauri/tauri.conf.tmp.json
+          mv src-tauri/tauri.conf.tmp.json src-tauri/tauri.conf.json
+
+      - name: Verify version sync
+        run: |
+          echo "package.json version: $(node -p "require('./package.json').version")"
+          echo "tauri.conf.json version: $(jq -r '.version' src-tauri/tauri.conf.json)"
+
+      - name: Build Linux bundles (AppImage, deb, rpm)
+        run: npm run tauri build -- --bundles deb,rpm,appimage
+
+      - name: Locate build artifacts
+        id: artifacts
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Bundle output directory contents:"
+          find src-tauri/target/release/bundle -maxdepth 2 -type f \
+            \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \)
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-quark-launcher-${{ steps.artifacts.outputs.version }}-appimage
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-quark-launcher-${{ steps.artifacts.outputs.version }}-deb
+          path: src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+      - name: Upload .rpm
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-quark-launcher-${{ steps.artifacts.outputs.version }}-rpm
+          path: src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error

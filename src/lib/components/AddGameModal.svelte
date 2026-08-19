@@ -141,7 +141,8 @@
 </script>
 
 {#if open}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="modal-backdrop" onclick={handleBackdropClick}>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-label="{existingGame ? 'Edit Game' : 'Add Game'}">
       <header class="modal-header">
@@ -330,6 +331,7 @@
 
   input[type="text"],
   select {
+    color-scheme: dark;
     background: #111128;
     border: 1px solid #2a2a4a;
     border-radius: 6px;
@@ -340,6 +342,24 @@
     transition: border-color 0.15s;
     width: 100%;
     box-sizing: border-box;
+  }
+
+  select {
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238888cc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.85rem center;
+    padding-right: 2.2rem;
+  }
+
+  select option {
+    color-scheme: dark;
+    background-color: #181830;
+    color: #e0e0ff;
+    padding: 0.5rem;
   }
 
   input[type="text"]:focus,
