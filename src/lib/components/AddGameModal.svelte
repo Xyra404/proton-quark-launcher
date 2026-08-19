@@ -1,7 +1,7 @@
 <script lang="ts">
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { listProtonVersions, addGame, updateGame } from '$lib/api';
-  import type { ProtonInstall, Game } from '$lib/types';
+  import type { ProtonInstall, Game, GamePlatform } from '$lib/types';
 
   interface Props {
     open: boolean;
@@ -13,6 +13,7 @@
   let { open = $bindable(), existingGame, onclose, ongameadded }: Props = $props();
 
   // ── Form state ──────────────────────────────────────────────────────────────
+  let platform = $state<GamePlatform>('Windows');
   let name = $state('');
   let exePath = $state('');
   let selectedProtonIndex = $state(-1);
@@ -30,14 +31,14 @@
   let exeError = $derived(
     exePath === ''
       ? 'Please pick an executable.'
-      : !exePath.toLowerCase().endsWith('.exe')
-      ? 'File must end in .exe.'
+      : (platform === 'Windows' && !exePath.toLowerCase().endsWith('.exe'))
+      ? 'Windows executable must end in .exe.'
       : ''
   );
   let protonError = $derived(selectedProtonIndex < 0 ? 'Select a Proton version.' : '');
 
   let canSubmit = $derived(
-    nameError === '' && exeError === '' && protonError === '' && !submitting
+    nameError === '' && exeError === '' && (platform === 'Linux' || protonError === '') && !submitting
   );
 
   let selectedProton = $derived<ProtonInstall | undefined>(
@@ -71,12 +72,14 @@
   $effect(() => {
     if (open) {
       if (existingGame) {
+        platform = existingGame.platform || 'Windows';
         name = existingGame.name;
         exePath = existingGame.exe_path;
         prefixPath = existingGame.prefix_path || '';
         launchArgs = existingGame.launch_args || '';
       }
     } else {
+      platform = 'Windows';
       name = '';
       exePath = '';
       selectedProtonIndex = protonVersions.length > 0 ? 0 : -1;
@@ -89,10 +92,13 @@
 
   // ── File picker ──────────────────────────────────────────────────────────────
   async function pickExe() {
+    const title = platform === 'Windows' ? 'Select Windows Executable' : 'Select Linux Executable';
+    const filters = platform === 'Windows' ? [{ name: 'Windows Executable', extensions: ['exe'] }] : [];
+    
     const result = await openDialog({
-      title: 'Select Windows Executable',
+      title,
       multiple: false,
-      filters: [{ name: 'Windows Executable', extensions: ['exe'] }],
+      filters,
     });
     if (result && typeof result === 'string') {
       exePath = result;
@@ -111,10 +117,11 @@
       const gameData: Game = {
         id: existingGame ? existingGame.id : crypto.randomUUID(),
         name: name.trim(),
+        platform,
         exe_path: exePath,
-        proton_version: selectedProton.name,
-        proton_path: selectedProton.path,
-        prefix_path: prefixPath.trim() || undefined,
+        proton_version: platform === 'Windows' ? selectedProton.name : undefined,
+        proton_path: platform === 'Windows' ? selectedProton.path : undefined,
+        prefix_path: platform === 'Windows' ? (prefixPath.trim() || undefined) : undefined,
         launch_args: launchArgs.trim() || undefined,
         last_played: existingGame ? existingGame.last_played : undefined,
       };
@@ -152,6 +159,27 @@
 
       <form onsubmit={handleSubmit} novalidate>
 
+        <!-- Platform Toggle -->
+        <div class="field">
+          <span class="group-label">Platform</span>
+          <div class="segmented-control">
+            <button
+              type="button"
+              class="segment {platform === 'Windows' ? 'active' : ''}"
+              onclick={() => platform = 'Windows'}
+            >
+              Windows (Proton)
+            </button>
+            <button
+              type="button"
+              class="segment {platform === 'Linux' ? 'active' : ''}"
+              onclick={() => platform = 'Linux'}
+            >
+              Linux Native
+            </button>
+          </div>
+        </div>
+
         <!-- Name -->
         <div class="field">
           <label for="game-name">Game Name</label>
@@ -173,7 +201,7 @@
               id="exe-path"
               type="text"
               bind:value={exePath}
-              placeholder="/mnt/games/game.exe"
+              placeholder={platform === 'Windows' ? "/mnt/games/game.exe" : "/mnt/games/game_bin"}
               readonly
             />
             <button type="button" class="browse-btn" onclick={pickExe}>Browse…</button>
@@ -181,38 +209,42 @@
           {#if exeError && exePath !== ''}<span class="field-error">{exeError}</span>{/if}
         </div>
 
-        <!-- Proton Version -->
-        <div class="field">
-          <label for="proton-select">Proton Version</label>
-          {#if loadingProton}
-            <p class="loading-text">Scanning for Proton installations…</p>
-          {:else if protonVersions.length === 0}
-            <p class="no-proton">No Proton installations found. Install GE-Proton or Steam Proton first.</p>
-          {:else}
-            <select id="proton-select" bind:value={selectedProtonIndex}>
-              {#each protonVersions as version, i}
-                <option value={i}>{version.name}</option>
-              {/each}
-            </select>
-            {#if selectedProton}
-              <span class="path-hint" title={selectedProton.path}>{selectedProton.path}</span>
+        {#if platform === 'Windows'}
+          <!-- Proton Version -->
+          <div class="field">
+            <label for="proton-select">Proton Version</label>
+            {#if loadingProton}
+              <p class="loading-text">Scanning for Proton installations…</p>
+            {:else if protonVersions.length === 0}
+              <p class="no-proton">No Proton installations found. Install GE-Proton or Steam Proton first.</p>
+            {:else}
+              <select id="proton-select" bind:value={selectedProtonIndex}>
+                {#each protonVersions as version, i}
+                  <option value={i}>{version.name}</option>
+                {/each}
+              </select>
+              {#if selectedProton}
+                <span class="path-hint" title={selectedProton.path}>{selectedProton.path}</span>
+              {/if}
             {/if}
-          {/if}
-          {#if protonError && !loadingProton}<span class="field-error">{protonError}</span>{/if}
-        </div>
+            {#if protonError && !loadingProton}<span class="field-error">{protonError}</span>{/if}
+          </div>
+        {/if}
 
         <!-- Advanced -->
         <details class="advanced">
           <summary>Advanced options</summary>
-          <div class="field">
-            <label for="prefix-path">Wine Prefix (optional)</label>
-            <input
-              id="prefix-path"
-              type="text"
-              bind:value={prefixPath}
-              placeholder="Leave blank to use auto-managed prefix"
-            />
-          </div>
+          {#if platform === 'Windows'}
+            <div class="field">
+              <label for="prefix-path">Wine Prefix (optional)</label>
+              <input
+                id="prefix-path"
+                type="text"
+                bind:value={prefixPath}
+                placeholder="Leave blank to use auto-managed prefix"
+              />
+            </div>
+          {/if}
           <div class="field">
             <label for="launch-args">Extra Launch Arguments (optional)</label>
             <input
@@ -321,7 +353,38 @@
     gap: 0.35rem;
   }
 
-  label {
+  /* Segmented control for Platform */
+  .segmented-control {
+    display: flex;
+    background: #111128;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .segment {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #9090cc;
+    padding: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .segment:hover:not(.active) {
+    background: #181838;
+    color: #c0c0ff;
+  }
+
+  .segment.active {
+    background: #303080;
+    color: #ffffff;
+  }
+
+  label, .group-label {
     font-size: 0.82rem;
     font-weight: 500;
     color: #8888cc;

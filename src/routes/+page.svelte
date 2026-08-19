@@ -34,15 +34,7 @@
       <span class="brand-icon">⚛</span>
       <span class="brand-name">Proton Quark Launcher</span>
     </div>
-    <div class="header-status">
-      {#if umuPresent === true}
-        <span class="status-dot ok" title="umu-launcher detected"></span>
-        <span class="status-label">umu-launcher ready</span>
-      {:else if umuPresent === false}
-        <span class="status-dot warn" title="umu-launcher not found"></span>
-        <span class="status-label warn">Fallback mode</span>
-      {/if}
-
+    <div class="header-actions">
       <!-- Settings Icon Button -->
       <button
         class="settings-btn"
@@ -58,25 +50,28 @@
     </div>
   </header>
 
-  <!-- umu warning banner -->
-  {#if umuPresent === false}
-    <div class="umu-banner" role="alert">
-      <span class="banner-icon">⚠</span>
-      <span class="banner-text">
-        <strong>umu-launcher not detected.</strong>
-        Games will fall back to running raw Proton directly, which may be less compatible.
-        For the best experience, install
-        <!-- svelte-ignore a11y_missing_attribute -->
-        <a href="https://github.com/Open-Wine-Components/umu-launcher" onclick={openUmuLink}>
-          umu-launcher
-        </a>.
-      </span>
-    </div>
-  {/if}
-
   <main class="app-content">
     <GameList />
   </main>
+
+  <!-- App Footer -->
+  <footer class="app-footer">
+    <div class="footer-status">
+      {#if umuPresent === true}
+        <span class="status-dot ok" title="umu-launcher detected"></span>
+        <span class="status-label">umu-launcher ready</span>
+      {:else if umuPresent === false}
+        <span class="status-dot warn" title="umu-launcher not found"></span>
+        <span class="status-label warn">
+          <strong>Fallback mode:</strong> umu-launcher not detected (using raw Proton).
+          <!-- svelte-ignore a11y_missing_attribute -->
+          <a href="https://github.com/Open-Wine-Components/umu-launcher" onclick={openUmuLink}>
+            Install umu-launcher
+          </a>
+        </span>
+      {/if}
+    </div>
+  </footer>
 </div>
 
 <!-- Settings Drawer -->
@@ -154,28 +149,11 @@
     color: #c0c0ff;
   }
 
-  .header-status {
+  .header-actions {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.5rem;
   }
-
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .status-dot.ok   { background: #40c040; box-shadow: 0 0 6px #40c04088; }
-  .status-dot.warn { background: #e09020; box-shadow: 0 0 6px #e0902088; }
-
-  .status-label {
-    font-size: 0.78rem;
-    color: #5050a0;
-  }
-
-  .status-label.warn { color: #a06020; }
 
   .settings-btn {
     background: none;
@@ -187,7 +165,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-left: 0.5rem;
     transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.25s;
   }
 
@@ -198,48 +175,6 @@
     transform: rotate(45deg);
   }
 
-  /* ── UMU warning banner ──────────────────────────────────────────────────── */
-  .umu-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    background: #1a1200;
-    border-bottom: 1px solid #4a3a00;
-    padding: 0.75rem 1.5rem;
-    animation: banner-in 0.2s ease-out;
-  }
-
-  @keyframes banner-in {
-    from { opacity: 0; transform: translateY(-6px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  .banner-icon {
-    color: #c08020;
-    font-size: 1rem;
-    flex-shrink: 0;
-    margin-top: 0.05rem;
-  }
-
-  .banner-text {
-    font-size: 0.84rem;
-    color: #b09040;
-    line-height: 1.5;
-  }
-
-  .banner-text strong {
-    color: #d0b050;
-  }
-
-  .banner-text a {
-    color: #80a0e0;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    cursor: pointer;
-  }
-
-  .banner-text a:hover { color: #a0c0ff; }
-
   /* ── Main content ────────────────────────────────────────────────────────── */
   .app-content {
     flex: 1;
@@ -247,5 +182,53 @@
     max-width: 900px;
     width: 100%;
     margin: 0 auto;
+  }
+
+  /* ── Footer ───────────────────────────────────────────────────────────────── */
+  .app-footer {
+    height: 36px;
+    background: #080814;
+    border-top: 1px solid #1a1a38;
+    display: flex;
+    align-items: center;
+    padding: 0 1.25rem;
+    font-size: 0.76rem;
+    flex-shrink: 0;
+  }
+
+  .footer-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #6060a0;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .status-dot.ok   { background: #40c040; box-shadow: 0 0 5px #40c04088; }
+  .status-dot.warn { background: #e09020; box-shadow: 0 0 5px #e0902088; }
+
+  .status-label {
+    color: #5050a0;
+  }
+
+  .status-label.warn {
+    color: #a07030;
+  }
+
+  .status-label a {
+    color: #7090d0;
+    text-decoration: underline;
+    margin-left: 0.25rem;
+    cursor: pointer;
+  }
+
+  .status-label a:hover {
+    color: #90b0ff;
   }
 </style>

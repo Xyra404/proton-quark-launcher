@@ -1,11 +1,12 @@
 use std::fs::{self, File};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use chrono::Utc;
 use tauri::{AppHandle, Manager};
 
-use crate::models::Game;
+use crate::models::{Game, GamePlatform};
 use crate::proton::is_umu_installed;
 use crate::store::{load_games, save_games};
 
@@ -124,7 +125,8 @@ fn sanitize_child_env(cmd: &mut Command) {
 pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
     // ── Pre-flight checks ────────────────────────────────────────────────────
 
-    if !Path::new(&game.exe_path).exists() {
+    let exe_path = Path::new(&game.exe_path);
+    if !exe_path.exists() {
         return Err(format!(
             "Game executable not found on disk: '{}'. \
              Has the file been moved or deleted?",
@@ -132,71 +134,83 @@ pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
         ));
     }
 
-    if !Path::new(&game.proton_path).exists() {
-        return Err(format!(
-            "Proton installation directory not found: '{}'. \
-             The Proton version '{}' may have been uninstalled.",
-            game.proton_path, game.proton_version
-        ));
-    }
-
-    // ── Resolve paths ────────────────────────────────────────────────────────
-
-    let prefix = resolve_prefix(&app, &game)?;
     let log_file = open_log_file(&app, &game)?;
-
-    // Clone the file handle so both stdout and stderr point to the same log.
     let log_stderr = log_file
         .try_clone()
         .map_err(|e| format!("Failed to duplicate log file handle: {e}"))?;
 
     let extra_args = split_launch_args(&game.launch_args);
 
-    // ── Choose launch strategy ───────────────────────────────────────────────
-
-    let mut cmd = if is_umu_installed() {
-        // ── Primary: umu-run ────────────────────────────────────────────────
-        //
-        // umu-run <exe_path> [extra args…]
-        //   WINEPREFIX  = resolved prefix directory
-        //   PROTONPATH  = absolute path to the Proton install
-        let mut c = Command::new("umu-run");
-        c.arg(&game.exe_path);
-        c.args(&extra_args);
-        c.env("WINEPREFIX", prefix.as_os_str());
-        c.env("PROTONPATH", &game.proton_path);
-        c
-    } else {
-        // ── Fallback: bare Proton binary ─────────────────────────────────────
-        //
-        // <proton_path>/proton run <exe_path> [extra args…]
-        //   STEAM_COMPAT_DATA_PATH          = resolved prefix directory
-        //   STEAM_COMPAT_CLIENT_INSTALL_PATH = native / Flatpak Steam root
-
-        let proton_bin = PathBuf::from(&game.proton_path).join("proton");
-        if !proton_bin.exists() {
+    let mut cmd = if game.platform == GamePlatform::Linux {
+        // ── Linux Native Launch ──────────────────────────────────────────────
+        let metadata = fs::metadata(exe_path)
+            .map_err(|e| format!("Failed to read metadata for '{}': {e}", game.exe_path))?;
+            
+        if metadata.permissions().mode() & 0o111 == 0 {
             return Err(format!(
-                "Cannot launch '{}': neither 'umu-run' was found on PATH \
-                 nor the Proton binary exists at '{}'. \
-                 Install umu-launcher or verify your Proton installation.",
-                game.name,
-                proton_bin.display()
+                "The file '{}' is not marked as executable. \
+                 Please ensure it has execute permissions (e.g. chmod +x).",
+                game.exe_path
             ));
         }
 
-        let steam_root = resolve_steam_root().ok_or_else(|| {
-            "Proton fallback launch failed: could not locate a Steam installation \
-             directory (checked native and Flatpak paths)."
-                .to_owned()
-        })?;
-
-        let mut c = Command::new(&proton_bin);
-        c.arg("run");
-        c.arg(&game.exe_path);
+        let mut c = Command::new(&game.exe_path);
         c.args(&extra_args);
-        c.env("STEAM_COMPAT_DATA_PATH", prefix.as_os_str());
-        c.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", steam_root.as_os_str());
         c
+    } else {
+        // ── Windows (Proton) Launch ──────────────────────────────────────────
+        
+        let proton_path = game.proton_path.as_deref().ok_or_else(|| {
+            format!("Proton path is missing for Windows game '{}'.", game.name)
+        })?;
+        
+        let proton_version = game.proton_version.as_deref().unwrap_or("Unknown");
+
+        if !Path::new(proton_path).exists() {
+            return Err(format!(
+                "Proton installation directory not found: '{}'. \
+                 The Proton version '{}' may have been uninstalled.",
+                proton_path, proton_version
+            ));
+        }
+
+        let prefix = resolve_prefix(&app, &game)?;
+
+        if is_umu_installed() {
+            // Primary: umu-run
+            let mut c = Command::new("umu-run");
+            c.arg(&game.exe_path);
+            c.args(&extra_args);
+            c.env("WINEPREFIX", prefix.as_os_str());
+            c.env("PROTONPATH", proton_path);
+            c
+        } else {
+            // Fallback: bare Proton binary
+            let proton_bin = PathBuf::from(proton_path).join("proton");
+            if !proton_bin.exists() {
+                return Err(format!(
+                    "Cannot launch '{}': neither 'umu-run' was found on PATH \
+                     nor the Proton binary exists at '{}'. \
+                     Install umu-launcher or verify your Proton installation.",
+                    game.name,
+                    proton_bin.display()
+                ));
+            }
+
+            let steam_root = resolve_steam_root().ok_or_else(|| {
+                "Proton fallback launch failed: could not locate a Steam installation \
+                 directory (checked native and Flatpak paths)."
+                    .to_owned()
+            })?;
+
+            let mut c = Command::new(&proton_bin);
+            c.arg("run");
+            c.arg(&game.exe_path);
+            c.args(&extra_args);
+            c.env("STEAM_COMPAT_DATA_PATH", prefix.as_os_str());
+            c.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", steam_root.as_os_str());
+            c
+        }
     };
 
     // Strip AppImage-injected runtime variables (PYTHONHOME, PYTHONPATH,

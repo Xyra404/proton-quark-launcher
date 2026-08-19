@@ -142,9 +142,15 @@
             <div class="game-info">
               <span class="game-name">{game.name}</span>
               <span class="game-meta">
-                <span class="meta-proton" title={game.proton_path}>
-                  ⚙ {game.proton_version}
-                </span>
+                {#if game.platform === 'Linux'}
+                  <span class="meta-proton" title="Linux Native">
+                    🐧 Native
+                  </span>
+                {:else}
+                  <span class="meta-proton" title={game.proton_path}>
+                    ⊞ {game.proton_version}
+                  </span>
+                {/if}
                 <span class="meta-sep">·</span>
                 <span class="meta-played" title={game.last_played ?? ''}>
                   🕐 {formatDate(game.last_played)}
