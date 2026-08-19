@@ -6,6 +6,9 @@ mod models;
 mod proton;
 mod proton_downloader;
 mod store;
+mod process_registry;
+
+use process_registry::{ProcessRegistry, force_quit_game, is_game_running, list_running_game_ids};
 
 use collections::{
     add_game_to_collection, create_collection, delete_collection, list_collections,
@@ -27,6 +30,7 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), String> {
     tauri::Builder::default()
+        .manage(ProcessRegistry::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -52,6 +56,9 @@ pub fn run() -> Result<(), String> {
             delete_collection,
             add_game_to_collection,
             remove_game_from_collection,
+            is_game_running,
+            list_running_game_ids,
+            force_quit_game,
         ])
         .run(tauri::generate_context!())
         .map_err(|e| format!("error while running tauri application: {}", e))

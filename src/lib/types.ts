@@ -23,6 +23,8 @@ export interface Game {
   launch_args?: string;
   /** ISO 8601 UTC timestamp of the last launch, or undefined if never played */
   last_played?: string;
+  /** Total playtime in seconds */
+  total_playtime_seconds: number;
   /** Toggle for MangoHud performance overlay & FPS limiter */
   enable_mangohud?: boolean;
   /** Toggle for Feral GameMode CPU/GPU performance optimizer */

@@ -136,6 +136,7 @@
         enable_gamemode: enableGamemode,
         enable_gamescope: enableGamescope,
         last_played: existingGame ? existingGame.last_played : undefined,
+        total_playtime_seconds: existingGame ? existingGame.total_playtime_seconds : 0,
       };
 
       if (existingGame) {

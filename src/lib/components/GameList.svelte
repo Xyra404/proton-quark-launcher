@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { listGames, removeGame, launchGame, addGameToCollection, removeGameFromCollection } from '$lib/api';
+  import { listGames, removeGame, launchGame, addGameToCollection, removeGameFromCollection, listRunningGameIds, forceQuitGame } from '$lib/api';
+  import { listen } from '@tauri-apps/api/event';
   import type { Game, Collection } from '$lib/types';
   import Toast from './Toast.svelte';
   import AddGameModal from './AddGameModal.svelte';
@@ -20,6 +21,9 @@
 
   // Track which game IDs are currently mid-launch (for per-button spinner).
   let launchingIds = $state<Set<string>>(new Set());
+
+  // Track running games
+  let runningGames = $state<Set<string>>(new Set());
 
   let addModalOpen = $state(false);
   let gameToEdit = $state<Game | undefined>(undefined);
@@ -82,9 +86,30 @@
     return allGames.filter(g => ids.has(g.id));
   });
 
-  // ── Load games on mount ───────────────────────────────────────────────────────
+  // ── Load games & states on mount ─────────────────────────────────────────────
   $effect(() => {
     fetchGames();
+
+    listRunningGameIds()
+      .then(ids => {
+        runningGames = new Set(ids);
+      })
+      .catch(e => console.error("Failed to load running games:", e));
+
+    const unlistenPromise = listen<{ game_id: string, exit_success: boolean, session_seconds: number, total_playtime_seconds: number }>('game-stopped', (event) => {
+      runningGames = new Set([...runningGames].filter(id => id !== event.payload.game_id));
+      
+      const game = allGames.find(g => g.id === event.payload.game_id);
+      if (game) {
+        game.total_playtime_seconds = event.payload.total_playtime_seconds;
+      }
+
+      fetchGames(); // Refresh UI to update last_played
+    });
+
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
   });
 
   async function fetchGames() {
@@ -104,12 +129,21 @@
     launchingIds = new Set([...launchingIds, game.id]);
     try {
       await launchGame(game);
+      runningGames = new Set([...runningGames, game.id]);
       // Refresh so last_played updates in the UI.
       await fetchGames();
     } catch (e: unknown) {
       toastMsg = e instanceof Error ? e.message : String(e);
     } finally {
       launchingIds = new Set([...launchingIds].filter((id) => id !== game.id));
+    }
+  }
+
+  async function handleForceQuit(game: Game) {
+    try {
+      await forceQuitGame(game.id);
+    } catch (e: unknown) {
+      toastMsg = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -164,6 +198,19 @@
     } catch {
       return iso;
     }
+  }
+
+  function formatPlaytime(seconds?: number): string {
+    if (!seconds) return 'Never played';
+    if (seconds < 60) return '< 1m played';
+    
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    
+    if (hours > 0) {
+      return `${hours}h ${mins}m played`;
+    }
+    return `${mins}m played`;
   }
 </script>
 
@@ -225,23 +272,40 @@
                 <span class="meta-played" title={game.last_played ?? ''}>
                   🕐 {formatDate(game.last_played)}
                 </span>
+                <span class="meta-sep">·</span>
+                <span class="meta-playtime">
+                  ⏱ {formatPlaytime(game.total_playtime_seconds)}
+                </span>
               </span>
               <span class="game-exe" title={game.exe_path}>{game.exe_path}</span>
             </div>
 
             <div class="card-actions">
-              <button
-                class="btn-launch"
-                onclick={() => handleLaunch(game)}
-                disabled={isLaunching}
-                aria-label="Launch {game.name}"
-              >
-                {#if isLaunching}
-                  <span class="btn-spinner"></span> Launching…
-                {:else}
-                  ▶ Launch
-                {/if}
-              </button>
+              {#if runningGames.has(game.id)}
+                <div class="running-badge">
+                  <span class="pulse-dot"></span> Running
+                </div>
+                <button
+                  class="btn-launch force-quit"
+                  onclick={() => handleForceQuit(game)}
+                  aria-label="Force quit {game.name}"
+                >
+                  ⏹ Force Quit
+                </button>
+              {:else}
+                <button
+                  class="btn-launch"
+                  onclick={() => handleLaunch(game)}
+                  disabled={isLaunching}
+                  aria-label="Launch {game.name}"
+                >
+                  {#if isLaunching}
+                    <span class="btn-spinner"></span> Launching…
+                  {:else}
+                    ▶ Launch
+                  {/if}
+                </button>
+              {/if}
               <button
                 class="btn-icon btn-col"
                 class:active={popoverOpenForGame === game.id}
@@ -533,6 +597,45 @@
   .btn-launch:disabled {
     opacity: 0.7;
     cursor: not-allowed;
+  }
+
+  .btn-launch.force-quit {
+    background: #4a1a1a;
+    border-color: #8a2a2a;
+    color: #ff8080;
+  }
+
+  .btn-launch.force-quit:hover {
+    background: #6a2a2a;
+    border-color: #aa3a3a;
+  }
+
+  .running-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #70e070;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0 0.5rem;
+    background: rgba(40, 90, 40, 0.2);
+    border: 1px solid rgba(110, 220, 110, 0.3);
+    border-radius: 6px;
+    height: 32px;
+  }
+
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #70e070;
+    animation: pulse-green 2s infinite;
+  }
+
+  @keyframes pulse-green {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(112, 224, 112, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 4px rgba(112, 224, 112, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(112, 224, 112, 0); }
   }
 
   .btn-icon {

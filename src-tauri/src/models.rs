@@ -43,6 +43,10 @@ pub struct Game {
     /// `None` if the game has never been launched.
     pub last_played: Option<String>,
 
+    /// Accumulated play time across all sessions, in seconds.
+    #[serde(default)]
+    pub total_playtime_seconds: u64,
+
     /// Toggle for MangoHud performance overlay & FPS limiter.
     #[serde(default)]
     pub enable_mangohud: bool,

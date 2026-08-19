@@ -42,10 +42,22 @@ export async function isUmuInstalled(): Promise<boolean> {
   return call<boolean>('is_umu_installed');
 }
 
-// ─── Launcher ────────────────────────────────────────────────────────────────
+// ─── Launcher & Process Management ──────────────────────────────────────────
 
 export async function launchGame(game: Game): Promise<void> {
   return call<void>('launch_game', { game });
+}
+
+export async function isGameRunning(gameId: string): Promise<boolean> {
+  return call<boolean>('is_game_running', { gameId });
+}
+
+export async function listRunningGameIds(): Promise<string[]> {
+  return call<string[]>('list_running_game_ids');
+}
+
+export async function forceQuitGame(gameId: string): Promise<void> {
+  return call<void>('force_quit_game', { gameId });
 }
 
 // ─── Custom Proton Paths ────────────────────────────────────────────────────
