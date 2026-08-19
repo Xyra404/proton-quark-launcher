@@ -19,6 +19,9 @@
   let selectedProtonIndex = $state(-1);
   let prefixPath = $state('');
   let launchArgs = $state('');
+  let enableMangohud = $state(false);
+  let enableGamemode = $state(false);
+  let enableGamescope = $state(false);
 
   // ── Async state ─────────────────────────────────────────────────────────────
   let protonVersions = $state<ProtonInstall[]>([]);
@@ -77,6 +80,9 @@
         exePath = existingGame.exe_path;
         prefixPath = existingGame.prefix_path || '';
         launchArgs = existingGame.launch_args || '';
+        enableMangohud = existingGame.enable_mangohud ?? false;
+        enableGamemode = existingGame.enable_gamemode ?? false;
+        enableGamescope = existingGame.enable_gamescope ?? false;
       }
     } else {
       platform = 'Windows';
@@ -85,6 +91,9 @@
       selectedProtonIndex = protonVersions.length > 0 ? 0 : -1;
       prefixPath = '';
       launchArgs = '';
+      enableMangohud = false;
+      enableGamemode = false;
+      enableGamescope = false;
       errorMsg = '';
       submitting = false;
     }
@@ -123,6 +132,9 @@
         proton_path: platform === 'Windows' ? selectedProton.path : undefined,
         prefix_path: platform === 'Windows' ? (prefixPath.trim() || undefined) : undefined,
         launch_args: launchArgs.trim() || undefined,
+        enable_mangohud: enableMangohud,
+        enable_gamemode: enableGamemode,
+        enable_gamescope: enableGamescope,
         last_played: existingGame ? existingGame.last_played : undefined,
       };
 
@@ -253,6 +265,33 @@
               bind:value={launchArgs}
               placeholder="-windowed -nosplash"
             />
+          </div>
+
+          <!-- Integrations & Toggles -->
+          <div class="toggle-group">
+            <label class="toggle-row">
+              <input type="checkbox" bind:checked={enableMangohud} />
+              <div class="toggle-info">
+                <span class="toggle-title">Enable MangoHud</span>
+                <span class="toggle-desc">Display FPS, GPU/CPU usage & performance overlay (requires mangohud package)</span>
+              </div>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" bind:checked={enableGamemode} />
+              <div class="toggle-info">
+                <span class="toggle-title">Enable GameMode (Feral Interactive)</span>
+                <span class="toggle-desc">Optimize CPU governor, GPU clocks & process priority (requires gamemode package)</span>
+              </div>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" bind:checked={enableGamescope} />
+              <div class="toggle-info">
+                <span class="toggle-title">Enable Gamescope</span>
+                <span class="toggle-desc">Isolate game inside Valve's Gamescope micro-compositor (requires gamescope package)</span>
+              </div>
+            </label>
           </div>
         </details>
 
@@ -522,6 +561,54 @@
 
   .advanced .field {
     margin-top: 0.75rem;
+  }
+
+  .toggle-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed #2a2a4a;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    cursor: pointer;
+    padding: 0.35rem 0.4rem;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  .toggle-row:hover {
+    background: #15152a;
+  }
+
+  .toggle-row input[type="checkbox"] {
+    accent-color: #6060e0;
+    width: 15px;
+    height: 15px;
+    margin-top: 0.15rem;
+    cursor: pointer;
+  }
+
+  .toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .toggle-title {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #d0d0ff;
+  }
+
+  .toggle-desc {
+    font-size: 0.75rem;
+    color: #6060a0;
   }
 
   .modal-actions {

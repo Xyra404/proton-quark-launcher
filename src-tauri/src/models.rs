@@ -42,6 +42,18 @@ pub struct Game {
     /// ISO 8601 timestamp of the last launch, e.g. "2025-08-19T12:00:00Z".
     /// `None` if the game has never been launched.
     pub last_played: Option<String>,
+
+    /// Toggle for MangoHud performance overlay & FPS limiter.
+    #[serde(default)]
+    pub enable_mangohud: bool,
+
+    /// Toggle for Feral GameMode CPU/GPU performance optimizer.
+    #[serde(default)]
+    pub enable_gamemode: bool,
+
+    /// Toggle for Gamescope micro-compositor.
+    #[serde(default)]
+    pub enable_gamescope: bool,
 }
 
 /// A user-defined collection grouping multiple games together.

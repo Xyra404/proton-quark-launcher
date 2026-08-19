@@ -141,7 +141,7 @@ pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
 
     let extra_args = split_launch_args(&game.launch_args);
 
-    let mut cmd = if game.platform == GamePlatform::Linux {
+    let (base_bin, base_args, env_vars) = if game.platform == GamePlatform::Linux {
         // ── Linux Native Launch ──────────────────────────────────────────────
         let metadata = fs::metadata(exe_path)
             .map_err(|e| format!("Failed to read metadata for '{}': {e}", game.exe_path))?;
@@ -154,9 +154,7 @@ pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
             ));
         }
 
-        let mut c = Command::new(&game.exe_path);
-        c.args(&extra_args);
-        c
+        (game.exe_path.clone(), extra_args, vec![])
     } else {
         // ── Windows (Proton) Launch ──────────────────────────────────────────
         
@@ -178,12 +176,13 @@ pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
 
         if is_umu_installed() {
             // Primary: umu-run
-            let mut c = Command::new("umu-run");
-            c.arg(&game.exe_path);
-            c.args(&extra_args);
-            c.env("WINEPREFIX", prefix.as_os_str());
-            c.env("PROTONPATH", proton_path);
-            c
+            let mut args = vec![game.exe_path.clone()];
+            args.extend(extra_args);
+            let envs = vec![
+                ("WINEPREFIX".to_string(), prefix.to_string_lossy().to_string()),
+                ("PROTONPATH".to_string(), proton_path.to_string()),
+            ];
+            ("umu-run".to_string(), args, envs)
         } else {
             // Fallback: bare Proton binary
             let proton_bin = PathBuf::from(proton_path).join("proton");
@@ -203,15 +202,45 @@ pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
                     .to_owned()
             })?;
 
-            let mut c = Command::new(&proton_bin);
-            c.arg("run");
-            c.arg(&game.exe_path);
-            c.args(&extra_args);
-            c.env("STEAM_COMPAT_DATA_PATH", prefix.as_os_str());
-            c.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", steam_root.as_os_str());
-            c
+            let mut args = vec!["run".to_string(), game.exe_path.clone()];
+            args.extend(extra_args);
+            let envs = vec![
+                ("STEAM_COMPAT_DATA_PATH".to_string(), prefix.to_string_lossy().to_string()),
+                ("STEAM_COMPAT_CLIENT_INSTALL_PATH".to_string(), steam_root.to_string_lossy().to_string()),
+            ];
+            (proton_bin.to_string_lossy().to_string(), args, envs)
         }
     };
+
+    // ── Apply MangoHud & Feral GameMode wrappers ────────────────────────────
+    let mut final_bin = base_bin;
+    let mut final_args = base_args;
+
+    if game.enable_mangohud {
+        final_args.insert(0, final_bin);
+        final_bin = "mangohud".to_string();
+    }
+
+    if game.enable_gamemode {
+        final_args.insert(0, final_bin);
+        final_bin = "gamemoderun".to_string();
+    }
+
+    if game.enable_gamescope {
+        final_args.insert(0, "--".to_string());
+        final_args.insert(1, final_bin);
+        final_bin = "gamescope".to_string();
+    }
+
+    let mut cmd = Command::new(&final_bin);
+    cmd.args(&final_args);
+    for (k, v) in env_vars {
+        cmd.env(k, v);
+    }
+
+    if game.enable_mangohud {
+        cmd.env("MANGOHUD", "1");
+    }
 
     // Strip AppImage-injected runtime variables (PYTHONHOME, PYTHONPATH,
     // LD_LIBRARY_PATH, etc.) so umu-run's/Proton's own Python and dynamic
