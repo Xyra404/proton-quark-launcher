@@ -1,13 +1,5 @@
 name: Build Linux Release
 
-# Fires only when a pull request targeting `master` is merged, and only if
-# that PR's source branch was `dev`. This is the standard, robust way to
-# detect "dev merged into master" — a plain `push: branches: [master]`
-# trigger would also fire on direct pushes, hotfix PRs, etc.
-#
-# workflow_dispatch is included so you can manually re-run this from the
-# Actions tab any time, and so GitHub has a way to "index" this workflow
-# the first time it's pushed directly to master.
 on:
   pull_request:
     types: [closed]
@@ -16,15 +8,17 @@ on:
 
 jobs:
   build-linux:
-    # Only proceed if the PR was actually merged (not just closed) and the
-    # source branch was dev. Manual dispatch runs always pass this check.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
        github.event.pull_request.head.ref == 'dev')
     runs-on: ubuntu-22.04
     permissions:
-      contents: read
+      contents: write   # needed to create the GitHub Release + tag, and to
+                        # commit the updated Flatpak manifest back to master
+    outputs:
+      version: ${{ steps.artifacts.outputs.version }}
+      deb_sha256: ${{ steps.checksum.outputs.sha }}
 
     steps:
       - name: Checkout master (post-merge)
@@ -46,8 +40,6 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # Ubuntu 22.04 is the minimum baseline glibc target Tauri v2
-      # recommends for maximum Linux compatibility of the AppImage.
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
@@ -69,11 +61,20 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # tauri.conf.json's top-level "version" field accepts either a literal
-      # semver string OR a path to a package.json to read from. This step
-      # explicitly copies package.json's version into tauri.conf.json before
-      # the build, so package.json stays the single source of truth and you
-      # never have to hand-edit tauri.conf.json when bumping versions.
+      # App icons are generated ONCE locally with:
+      #   npm run tauri icon assets/proton-quark-logo.png
+      # and the resulting src-tauri/icons/ directory is committed to the repo.
+      # This step just fails fast with a clear message if someone forgot to
+      # commit them, instead of letting the bundler fail cryptically later.
+      - name: Verify app icons are present
+        run: |
+          for f in icons/32x32.png icons/128x128.png icons/128x128@2x.png icons/icon.icns icons/icon.ico; do
+            if [ ! -f "src-tauri/$f" ]; then
+              echo "::error::Missing icon file src-tauri/$f — run 'npm run tauri icon assets/proton-quark-logo.png' locally and commit the icons/ directory."
+              exit 1
+            fi
+          done
+
       - name: Sync version from package.json into tauri.conf.json
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
@@ -95,9 +96,16 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Bundle output directory contents:"
           find src-tauri/target/release/bundle -maxdepth 2 -type f \
             \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \)
+
+      - name: Compute sha256 of the built .deb
+        id: checksum
+        run: |
+          DEB_PATH=$(find src-tauri/target/release/bundle/deb -name "*.deb" | head -n1)
+          SHA=$(sha256sum "$DEB_PATH" | awk '{print $1}')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Computed sha256: $SHA for $DEB_PATH"
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
@@ -119,3 +127,98 @@ jobs:
           name: proton-quark-launcher-${{ steps.artifacts.outputs.version }}-rpm
           path: src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: error
+
+      # Creates/refreshes a tagged GitHub Release with all three bundles
+      # attached. This is what gives both the AUR job and the Flatpak
+      # manifest a stable, public, checksummed URL to download from.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.artifacts.outputs.version }}
+          name: v${{ steps.artifacts.outputs.version }}
+          files: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+
+      # Keeps io.github.xyra404.proton-quark-launcher.yml pointed at the
+      # release we just cut, so the manifest is always ready to submit or
+      # resubmit to Flathub without manual editing.
+      - name: Update Flatpak manifest version + checksum
+        run: |
+          VERSION="${{ steps.artifacts.outputs.version }}"
+          SHA="${{ steps.checksum.outputs.sha }}"
+          MANIFEST="io.github.xyra404.proton-quark-launcher.yml"
+          sed -i \
+            -e "s|releases/download/v[^/]*/proton-quark-launcher_[^\"']*_amd64\.deb|releases/download/v${VERSION}/proton-quark-launcher_${VERSION}_amd64.deb|" \
+            -e "s|sha256:.*|sha256: ${SHA}|" \
+            "$MANIFEST"
+          cat "$MANIFEST"
+
+      - name: Commit updated Flatpak manifest back to master
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add io.github.xyra404.proton-quark-launcher.yml
+          git diff --cached --quiet && echo "No manifest changes" || \
+            git commit -m "chore: sync flatpak manifest to v${{ steps.artifacts.outputs.version }}"
+          git push origin master || echo "Nothing to push"
+
+  validate-flatpak:
+    needs: build-linux
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout master (with updated manifest)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Install Flatpak + Flatpak Builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub org.flatpak.Builder
+
+      - name: Lint the Flatpak manifest
+        run: |
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder \
+            manifest io.github.xyra404.proton-quark-launcher.yml
+
+      - name: Build the Flatpak (dry run, no install)
+        run: |
+          flatpak run --command=flathub-build org.flatpak.Builder \
+            io.github.xyra404.proton-quark-launcher.yml
+
+  publish-aur:
+    needs: build-linux
+    runs-on: ubuntu-latest
+    # Skips cleanly instead of hard-failing while AUR registration is frozen
+    # and you don't yet have AUR_SSH_PRIVATE_KEY configured as a secret.
+    # Flip the "AUR_ENABLED" repository VARIABLE (Settings > Secrets and
+    # variables > Actions > Variables) to "true" once AUR is set up.
+    if: ${{ vars.AUR_ENABLED == 'true' }}
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Render PKGBUILD with real version + checksum
+        run: |
+          VERSION="${{ needs.build-linux.outputs.version }}"
+          SHA="${{ needs.build-linux.outputs.deb_sha256 }}"
+          sed -e "s/^pkgver=.*/pkgver=${VERSION}/" \
+              -e "s/^sha256sums=.*/sha256sums=('${SHA}')/" \
+              aur/PKGBUILD.template > aur/PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
+        with:
+          pkgname: proton-quark-launcher-bin
+          pkgbuild: ./aur/PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to v${{ needs.build-linux.outputs.version }}"
+          ssh_keyscan_types: rsa,ecdsa,ed25519

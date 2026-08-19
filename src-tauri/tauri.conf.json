@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "proton-quark-launcher",
   "version": "0.1.0",
-  "identifier": "com.xyra.quark-launcher",
+  "identifier": "io.github.xyra404.proton-quark-launcher",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "proton-quark-launcher",
+        "title": "Proton Quark Launcher",
         "width": 800,
         "height": 600
       }
@@ -24,12 +24,31 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Game",
+    "shortDescription": "Run Windows games on Linux with your chosen Proton version",
+    "longDescription": "A lightweight launcher for manually adding Windows games and running them via umu-launcher with any installed Proton build, including custom builds like Proton-CachyOS-SLR and GE-Proton.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "libayatana-appindicator-gtk3"
+        ]
+      }
+    }
   }
 }
