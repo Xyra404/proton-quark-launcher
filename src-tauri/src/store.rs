@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 use crate::models::Game;
