@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use chrono::Utc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::models::{Game, GamePlatform};
-use crate::process_registry::{GameStoppedPayload, ProcessRegistry, RunningProcess};
+use crate::process_registry::{ProcessRegistry, RunningProcess};
 use crate::proton::is_umu_installed;
 use crate::store::{load_games, save_games};
 
