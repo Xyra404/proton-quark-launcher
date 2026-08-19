@@ -43,3 +43,16 @@ pub struct Game {
     /// `None` if the game has never been launched.
     pub last_played: Option<String>,
 }
+
+/// A user-defined collection grouping multiple games together.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Collection {
+    /// Stable unique identifier (UUID v4).
+    pub id: String,
+
+    /// Human-readable display name of the collection (e.g. "Favorites").
+    pub name: String,
+
+    /// List of game IDs belonging to this collection.
+    pub game_ids: Vec<String>,
+}

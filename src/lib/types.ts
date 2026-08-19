@@ -48,3 +48,15 @@ export interface ProtonRelease {
   /** ISO 8601 timestamp of when this release was published */
   published_at: string;
 }
+
+/**
+ * Mirrors `src-tauri/src/models.rs` → `Collection` exactly.
+ */
+export interface Collection {
+  /** Stable unique identifier (UUID v4). */
+  id: string;
+  /** Human-readable display name of the collection (e.g. "Favorites"). */
+  name: string;
+  /** List of game IDs belonging to this collection. */
+  game_ids: string[];
+}

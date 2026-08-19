@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod collections;
 mod custom_proton;
 mod launcher;
 mod models;
@@ -6,6 +7,10 @@ mod proton;
 mod proton_downloader;
 mod store;
 
+use collections::{
+    add_game_to_collection, create_collection, delete_collection, list_collections,
+    remove_game_from_collection, rename_collection,
+};
 use custom_proton::{add_custom_proton_path, list_custom_proton_paths, remove_custom_proton_path};
 use launcher::launch_game;
 use proton::{is_umu_installed, list_proton_versions};
@@ -41,6 +46,12 @@ pub fn run() -> Result<(), String> {
             list_available_proton_downloads,
             download_proton_version,
             delete_proton_version,
+            list_collections,
+            create_collection,
+            rename_collection,
+            delete_collection,
+            add_game_to_collection,
+            remove_game_from_collection,
         ])
         .run(tauri::generate_context!())
         .map_err(|e| format!("error while running tauri application: {}", e))

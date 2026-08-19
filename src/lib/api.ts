@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Game, ProtonInstall, ProtonRelease } from './types';
+import type { Game, ProtonInstall, ProtonRelease, Collection } from './types';
 
 /**
  * Thin invoke wrapper: runs `fn`, catches any Tauri/Rust error string,
@@ -74,4 +74,37 @@ export async function downloadProtonVersion(release: ProtonRelease): Promise<voi
 
 export async function deleteProtonVersion(path: string): Promise<void> {
   return call<void>('delete_proton_version', { path });
+}
+
+// ─── Collections ───────────────────────────────────────────────────────────────
+
+export async function listCollections(): Promise<Collection[]> {
+  return call<Collection[]>('list_collections');
+}
+
+export async function createCollection(name: string): Promise<Collection> {
+  return call<Collection>('create_collection', { name });
+}
+
+// Tauri v2 auto-converts Rust snake_case params to camelCase on the JS side.
+// The Rust command is `rename_collection(id: String, new_name: String)`, so
+// the expected invoke() key is `newName`, not `new_name`.
+export async function renameCollection(id: string, newName: string): Promise<void> {
+  return call<void>('rename_collection', { id, newName });
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+  return call<void>('delete_collection', { id });
+}
+
+// Rust command is `add_game_to_collection(collection_id: String, game_id: String)`
+// → expected invoke() keys are `collectionId` and `gameId`.
+export async function addGameToCollection(collectionId: string, gameId: string): Promise<void> {
+  return call<void>('add_game_to_collection', { collectionId, gameId });
+}
+
+// Same fix: `remove_game_from_collection(collection_id: String, game_id: String)`
+// → expected invoke() keys are `collectionId` and `gameId`.
+export async function removeGameFromCollection(collectionId: string, gameId: string): Promise<void> {
+  return call<void>('remove_game_from_collection', { collectionId, gameId });
 }

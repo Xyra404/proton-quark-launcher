@@ -1,19 +1,31 @@
 <script lang="ts">
-  import { isUmuInstalled } from '$lib/api';
+  import { isUmuInstalled, listCollections } from '$lib/api';
   import { openUrl } from '@tauri-apps/plugin-opener';
+  import type { Collection } from '$lib/types';
   import GameList from '$lib/components/GameList.svelte';
   import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
+  import CollectionSidebar from '$lib/components/CollectionSidebar.svelte';
 
   let umuPresent = $state<boolean | null>(null);
   let settingsOpen = $state(false);
+
+  // Collections state
+  let collections = $state<Collection[]>([]);
+  let selectedCollectionId = $state<string>('all');
+
+  function fetchCollections() {
+    listCollections().then((cols) => {
+      collections = cols;
+    }).catch(console.error);
+  }
 
   $effect(() => {
     isUmuInstalled().then((result) => {
       umuPresent = result;
     }).catch(() => {
-      // If the check itself fails, assume present — don't alarm the user.
       umuPresent = true;
     });
+    fetchCollections();
   });
 
   async function openUmuLink(e: MouseEvent) {
@@ -50,9 +62,23 @@
     </div>
   </header>
 
-  <main class="app-content">
-    <GameList />
-  </main>
+  <!-- Two-column main layout -->
+  <div class="app-body">
+    <CollectionSidebar
+      {collections}
+      selectedId={selectedCollectionId}
+      onselect={(id) => (selectedCollectionId = id)}
+      oncollectionschanged={fetchCollections}
+    />
+
+    <main class="app-content">
+      <GameList
+        {collections}
+        selectedCollectionId={selectedCollectionId}
+        oncollectionschanged={fetchCollections}
+      />
+    </main>
+  </div>
 
   <!-- App Footer -->
   <footer class="app-footer">
@@ -109,7 +135,15 @@
   .app-shell {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── App Body (Two Columns) ──────────────────────────────────────────────── */
+  .app-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden; /* Sidebar internal scrolling */
   }
 
   /* ── Header ──────────────────────────────────────────────────────────────── */
@@ -179,9 +213,7 @@
   .app-content {
     flex: 1;
     padding: 1.75rem 2rem;
-    max-width: 900px;
-    width: 100%;
-    margin: 0 auto;
+    overflow-y: auto;
   }
 
   /* ── Footer ───────────────────────────────────────────────────────────────── */

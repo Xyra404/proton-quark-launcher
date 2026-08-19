@@ -103,7 +103,12 @@ pub fn remove_game(app: AppHandle, id: String) -> Result<(), String> {
         return Err(format!("No game found with id '{id}'."));
     }
 
-    save_games(&app, &games)
+    save_games(&app, &games)?;
+
+    // Cleanup: Ensure this game is also removed from any collections it belonged to.
+    crate::collections::remove_game_from_all_collections(&app, &id)?;
+
+    Ok(())
 }
 
 /// Replaces an existing game (matched by `game.id`) with the updated struct.
