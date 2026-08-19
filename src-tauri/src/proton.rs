@@ -100,8 +100,10 @@ fn scan_dir(
 /// Search order (each directory is skipped if it doesn't exist):
 /// 1. `~/.steam/steam/compatibilitytools.d/`                       — all subfolders
 /// 2. `~/.local/share/Steam/steamapps/common/`                     — "Proton*" only
-/// 3. `~/.var/app/com.valvesoftware.Steam/…/steamapps/common/`     — "Proton*" only (Flatpak)
-/// 4. `~/.var/app/com.valvesoftware.Steam/…/compatibilitytools.d/` — all subfolders (Flatpak)
+/// 3. `/usr/share/steam/compatibilitytools.d/`                     — all subfolders (system-wide)
+/// 4. `~/.var/app/com.valvesoftware.Steam/…/steamapps/common/`     — "Proton*" only (Flatpak)
+/// 5. `~/.var/app/com.valvesoftware.Steam/…/compatibilitytools.d/` — all subfolders (Flatpak)
+/// 6. `/var/lib/flatpak/…/share/steam/compatibilitytools.d/`       — all subfolders (Flatpak system-wide)
 #[tauri::command]
 pub fn list_proton_versions() -> Result<Vec<ProtonInstall>, String> {
     let home = dirs::home_dir().ok_or("Could not resolve home directory")?;
@@ -135,6 +137,16 @@ pub fn list_proton_versions() -> Result<Vec<ProtonInstall>, String> {
                 ".var/app/com.valvesoftware.Steam/\
                  .local/share/Steam/compatibilitytools.d",
             ),
+            None,
+        ),
+        // 5. System-wide native tools
+        (
+            Path::new("/usr/share/steam/compatibilitytools.d"),
+            None,
+        ),
+        // 6. System-wide Flatpak tools
+        (
+            Path::new("/var/lib/flatpak/app/com.valvesoftware.Steam/current/active/files/share/steam/compatibilitytools.d"),
             None,
         ),
     ];
