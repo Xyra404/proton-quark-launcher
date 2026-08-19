@@ -1,5 +1,6 @@
 <script lang="ts">
   import CustomProtonPaths from './CustomProtonPaths.svelte';
+  import ProtonManager from './ProtonManager.svelte';
 
   interface Props {
     open: boolean;
@@ -7,6 +8,7 @@
   }
 
   let { open = $bindable(), onclose }: Props = $props();
+  let activeTab = $state<'manage' | 'custom'>('manage');
 
   function handleBackdropClick(e: MouseEvent) {
     if ((e.target as HTMLElement).classList.contains('drawer-backdrop')) {
@@ -47,19 +49,40 @@
         </button>
       </div>
 
+      <!-- Tab bar -->
+      <div class="tab-bar">
+        <button
+          class="tab-btn {activeTab === 'manage' ? 'active' : ''}"
+          onclick={() => (activeTab = 'manage')}
+        >
+          Browse & Install
+        </button>
+        <button
+          class="tab-btn {activeTab === 'custom' ? 'active' : ''}"
+          onclick={() => (activeTab = 'custom')}
+        >
+          Custom Paths
+        </button>
+      </div>
+
       <div class="drawer-body">
-        <section class="settings-section">
-          <h3 class="settings-section-heading">Proton Runtimes</h3>
-          <p class="settings-section-desc">
-            Manage how Proton installations are discovered. Custom folders are merged with
-            auto-detected Steam and system paths when you select a Proton version.
-          </p>
-          <CustomProtonPaths />
-        </section>
+        {#if activeTab === 'manage'}
+          <ProtonManager />
+        {:else}
+          <section class="settings-section">
+            <h3 class="settings-section-heading">Custom Proton Paths</h3>
+            <p class="settings-section-desc">
+              Register non-standard Proton installation folders. They are merged with
+              auto-detected Steam paths in the version selector.
+            </p>
+            <CustomProtonPaths />
+          </section>
+        {/if}
       </div>
     </div>
   </div>
 {/if}
+
 
 <style>
   /* ── Backdrop ─────────────────────────────────────────────────────────────── */
@@ -137,6 +160,38 @@
     color: #c0c0ff;
     border-color: #2a2a60;
     background: #1a1a38;
+  }
+
+  /* ── Tab bar ──────────────────────────────────────────────────────────────── */
+  .tab-bar {
+    display: flex;
+    border-bottom: 1px solid #1e1e42;
+    flex-shrink: 0;
+  }
+
+  .tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #5050a0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.65rem 0.5rem;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    margin-bottom: -1px;
+  }
+
+  .tab-btn:hover {
+    color: #9090d0;
+    background: #16163a;
+  }
+
+  .tab-btn.active {
+    color: #c0c0ff;
+    border-bottom-color: #6060e0;
   }
 
   /* ── Body ─────────────────────────────────────────────────────────────────── */

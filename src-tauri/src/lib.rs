@@ -3,11 +3,15 @@ mod custom_proton;
 mod launcher;
 mod models;
 mod proton;
+mod proton_downloader;
 mod store;
 
 use custom_proton::{add_custom_proton_path, list_custom_proton_paths, remove_custom_proton_path};
 use launcher::launch_game;
 use proton::{is_umu_installed, list_proton_versions};
+use proton_downloader::{
+    delete_proton_version, download_proton_version, list_available_proton_downloads,
+};
 use store::{add_game, list_games, remove_game, update_game};
 
 #[tauri::command]
@@ -34,6 +38,9 @@ pub fn run() -> Result<(), String> {
             add_custom_proton_path,
             remove_custom_proton_path,
             list_custom_proton_paths,
+            list_available_proton_downloads,
+            download_proton_version,
+            delete_proton_version,
         ])
         .run(tauri::generate_context!())
         .map_err(|e| format!("error while running tauri application: {}", e))

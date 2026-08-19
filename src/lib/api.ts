@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Game, ProtonInstall } from './types';
+import type { Game, ProtonInstall, ProtonRelease } from './types';
 
 /**
  * Thin invoke wrapper: runs `fn`, catches any Tauri/Rust error string,
@@ -62,3 +62,16 @@ export async function removeCustomProtonPath(path: string): Promise<void> {
   return call<void>('remove_custom_proton_path', { path });
 }
 
+// ─── Proton Downloader ───────────────────────────────────────────────────────
+
+export async function listAvailableProtonDownloads(): Promise<ProtonRelease[]> {
+  return call<ProtonRelease[]>('list_available_proton_downloads');
+}
+
+export async function downloadProtonVersion(release: ProtonRelease): Promise<void> {
+  return call<void>('download_proton_version', { release });
+}
+
+export async function deleteProtonVersion(path: string): Promise<void> {
+  return call<void>('delete_proton_version', { path });
+}

@@ -34,3 +34,17 @@ export interface ProtonInstall {
   /** Canonicalised absolute path to the Proton installation directory */
   path: string;
 }
+
+/**
+ * Mirrors `src-tauri/src/proton_downloader.rs` → `ProtonRelease` exactly.
+ */
+export interface ProtonRelease {
+  /** Release tag, e.g. "GE-Proton9-27" */
+  tag: string;
+  /** URL to the .tar.gz download asset */
+  download_url: string;
+  /** Size of the archive in bytes, if available */
+  size_bytes?: number;
+  /** ISO 8601 timestamp of when this release was published */
+  published_at: string;
+}
