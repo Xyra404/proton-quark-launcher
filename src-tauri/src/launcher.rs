@@ -81,6 +81,35 @@ fn split_launch_args(args: &Option<String>) -> Vec<String> {
     }
 }
 
+/// Strips environment variables that AppImage's `AppRun` wrapper injects for
+/// our OWN bundled runtime (Python, dynamic linker search paths, etc.).
+///
+/// Without this, any child process we spawn — like `umu-run`, which is
+/// itself a separate, system-installed Python program — inherits our
+/// AppImage's PYTHONHOME/PYTHONPATH/LD_LIBRARY_PATH pointing at paths
+/// *inside our own squashfs mount* (e.g. `/tmp/.mount_XXXXXX/usr/`).
+/// That breaks the child's Python interpreter immediately with errors like
+/// `ModuleNotFoundError: No module named 'encodings'`, since it goes
+/// looking for its standard library inside our app's mount point instead
+/// of its real, system location.
+///
+/// This has no effect when running as a plain binary, .deb, or .rpm
+/// install (those variables are never set in the first place) — it only
+/// matters for the AppImage build, but it's always safe to call.
+fn sanitize_child_env(cmd: &mut Command) {
+    for var in [
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "LD_LIBRARY_PATH",
+        "APPDIR",
+        "APPIMAGE",
+        "ARGV0",
+        "OWD",
+    ] {
+        cmd.env_remove(var);
+    }
+}
+
 // ─── Command ──────────────────────────────────────────────────────────────────
 
 /// Launches a Windows game through umu-launcher (preferred) or a raw Proton
@@ -169,6 +198,13 @@ pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
         c.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", steam_root.as_os_str());
         c
     };
+
+    // Strip AppImage-injected runtime variables (PYTHONHOME, PYTHONPATH,
+    // LD_LIBRARY_PATH, etc.) so umu-run's/Proton's own Python and dynamic
+    // linker aren't hijacked by our AppImage's mount paths. Applied to
+    // whichever branch was chosen above, since both spawn external tools
+    // that must use their own, correct runtime environment.
+    sanitize_child_env(&mut cmd);
 
     // ── Redirect output to log file ──────────────────────────────────────────
 
