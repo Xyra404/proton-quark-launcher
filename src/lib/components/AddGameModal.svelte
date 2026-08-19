@@ -1,7 +1,7 @@
 <script lang="ts">
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { listProtonVersions, addGame, updateGame } from '$lib/api';
-  import type { ProtonInstall, Game } from '$lib/types';
+  import type { ProtonInstall, Game, GamePlatform } from '$lib/types';
 
   interface Props {
     open: boolean;
@@ -13,11 +13,15 @@
   let { open = $bindable(), existingGame, onclose, ongameadded }: Props = $props();
 
   // ── Form state ──────────────────────────────────────────────────────────────
+  let platform = $state<GamePlatform>('Windows');
   let name = $state('');
   let exePath = $state('');
   let selectedProtonIndex = $state(-1);
   let prefixPath = $state('');
   let launchArgs = $state('');
+  let enableMangohud = $state(false);
+  let enableGamemode = $state(false);
+  let enableGamescope = $state(false);
 
   // ── Async state ─────────────────────────────────────────────────────────────
   let protonVersions = $state<ProtonInstall[]>([]);
@@ -30,14 +34,14 @@
   let exeError = $derived(
     exePath === ''
       ? 'Please pick an executable.'
-      : !exePath.toLowerCase().endsWith('.exe')
-      ? 'File must end in .exe.'
+      : (platform === 'Windows' && !exePath.toLowerCase().endsWith('.exe'))
+      ? 'Windows executable must end in .exe.'
       : ''
   );
   let protonError = $derived(selectedProtonIndex < 0 ? 'Select a Proton version.' : '');
 
   let canSubmit = $derived(
-    nameError === '' && exeError === '' && protonError === '' && !submitting
+    nameError === '' && exeError === '' && (platform === 'Linux' || protonError === '') && !submitting
   );
 
   let selectedProton = $derived<ProtonInstall | undefined>(
@@ -71,17 +75,25 @@
   $effect(() => {
     if (open) {
       if (existingGame) {
+        platform = existingGame.platform || 'Windows';
         name = existingGame.name;
         exePath = existingGame.exe_path;
         prefixPath = existingGame.prefix_path || '';
         launchArgs = existingGame.launch_args || '';
+        enableMangohud = existingGame.enable_mangohud ?? false;
+        enableGamemode = existingGame.enable_gamemode ?? false;
+        enableGamescope = existingGame.enable_gamescope ?? false;
       }
     } else {
+      platform = 'Windows';
       name = '';
       exePath = '';
       selectedProtonIndex = protonVersions.length > 0 ? 0 : -1;
       prefixPath = '';
       launchArgs = '';
+      enableMangohud = false;
+      enableGamemode = false;
+      enableGamescope = false;
       errorMsg = '';
       submitting = false;
     }
@@ -89,10 +101,13 @@
 
   // ── File picker ──────────────────────────────────────────────────────────────
   async function pickExe() {
+    const title = platform === 'Windows' ? 'Select Windows Executable' : 'Select Linux Executable';
+    const filters = platform === 'Windows' ? [{ name: 'Windows Executable', extensions: ['exe'] }] : [];
+    
     const result = await openDialog({
-      title: 'Select Windows Executable',
+      title,
       multiple: false,
-      filters: [{ name: 'Windows Executable', extensions: ['exe'] }],
+      filters,
     });
     if (result && typeof result === 'string') {
       exePath = result;
@@ -111,12 +126,17 @@
       const gameData: Game = {
         id: existingGame ? existingGame.id : crypto.randomUUID(),
         name: name.trim(),
+        platform,
         exe_path: exePath,
-        proton_version: selectedProton.name,
-        proton_path: selectedProton.path,
-        prefix_path: prefixPath.trim() || undefined,
+        proton_version: platform === 'Windows' ? selectedProton.name : undefined,
+        proton_path: platform === 'Windows' ? selectedProton.path : undefined,
+        prefix_path: platform === 'Windows' ? (prefixPath.trim() || undefined) : undefined,
         launch_args: launchArgs.trim() || undefined,
+        enable_mangohud: enableMangohud,
+        enable_gamemode: enableGamemode,
+        enable_gamescope: enableGamescope,
         last_played: existingGame ? existingGame.last_played : undefined,
+        total_playtime_seconds: existingGame ? existingGame.total_playtime_seconds : 0,
       };
 
       if (existingGame) {
@@ -152,6 +172,27 @@
 
       <form onsubmit={handleSubmit} novalidate>
 
+        <!-- Platform Toggle -->
+        <div class="field">
+          <span class="group-label">Platform</span>
+          <div class="segmented-control">
+            <button
+              type="button"
+              class="segment {platform === 'Windows' ? 'active' : ''}"
+              onclick={() => platform = 'Windows'}
+            >
+              Windows (Proton)
+            </button>
+            <button
+              type="button"
+              class="segment {platform === 'Linux' ? 'active' : ''}"
+              onclick={() => platform = 'Linux'}
+            >
+              Linux Native
+            </button>
+          </div>
+        </div>
+
         <!-- Name -->
         <div class="field">
           <label for="game-name">Game Name</label>
@@ -173,7 +214,7 @@
               id="exe-path"
               type="text"
               bind:value={exePath}
-              placeholder="/mnt/games/game.exe"
+              placeholder={platform === 'Windows' ? "/mnt/games/game.exe" : "/mnt/games/game_bin"}
               readonly
             />
             <button type="button" class="browse-btn" onclick={pickExe}>Browse…</button>
@@ -181,38 +222,42 @@
           {#if exeError && exePath !== ''}<span class="field-error">{exeError}</span>{/if}
         </div>
 
-        <!-- Proton Version -->
-        <div class="field">
-          <label for="proton-select">Proton Version</label>
-          {#if loadingProton}
-            <p class="loading-text">Scanning for Proton installations…</p>
-          {:else if protonVersions.length === 0}
-            <p class="no-proton">No Proton installations found. Install GE-Proton or Steam Proton first.</p>
-          {:else}
-            <select id="proton-select" bind:value={selectedProtonIndex}>
-              {#each protonVersions as version, i}
-                <option value={i}>{version.name}</option>
-              {/each}
-            </select>
-            {#if selectedProton}
-              <span class="path-hint" title={selectedProton.path}>{selectedProton.path}</span>
+        {#if platform === 'Windows'}
+          <!-- Proton Version -->
+          <div class="field">
+            <label for="proton-select">Proton Version</label>
+            {#if loadingProton}
+              <p class="loading-text">Scanning for Proton installations…</p>
+            {:else if protonVersions.length === 0}
+              <p class="no-proton">No Proton installations found. Install GE-Proton or Steam Proton first.</p>
+            {:else}
+              <select id="proton-select" bind:value={selectedProtonIndex}>
+                {#each protonVersions as version, i}
+                  <option value={i}>{version.name}</option>
+                {/each}
+              </select>
+              {#if selectedProton}
+                <span class="path-hint" title={selectedProton.path}>{selectedProton.path}</span>
+              {/if}
             {/if}
-          {/if}
-          {#if protonError && !loadingProton}<span class="field-error">{protonError}</span>{/if}
-        </div>
+            {#if protonError && !loadingProton}<span class="field-error">{protonError}</span>{/if}
+          </div>
+        {/if}
 
         <!-- Advanced -->
         <details class="advanced">
           <summary>Advanced options</summary>
-          <div class="field">
-            <label for="prefix-path">Wine Prefix (optional)</label>
-            <input
-              id="prefix-path"
-              type="text"
-              bind:value={prefixPath}
-              placeholder="Leave blank to use auto-managed prefix"
-            />
-          </div>
+          {#if platform === 'Windows'}
+            <div class="field">
+              <label for="prefix-path">Wine Prefix (optional)</label>
+              <input
+                id="prefix-path"
+                type="text"
+                bind:value={prefixPath}
+                placeholder="Leave blank to use auto-managed prefix"
+              />
+            </div>
+          {/if}
           <div class="field">
             <label for="launch-args">Extra Launch Arguments (optional)</label>
             <input
@@ -221,6 +266,33 @@
               bind:value={launchArgs}
               placeholder="-windowed -nosplash"
             />
+          </div>
+
+          <!-- Integrations & Toggles -->
+          <div class="toggle-group">
+            <label class="toggle-row">
+              <input type="checkbox" bind:checked={enableMangohud} />
+              <div class="toggle-info">
+                <span class="toggle-title">Enable MangoHud</span>
+                <span class="toggle-desc">Display FPS, GPU/CPU usage & performance overlay (requires mangohud package)</span>
+              </div>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" bind:checked={enableGamemode} />
+              <div class="toggle-info">
+                <span class="toggle-title">Enable GameMode (Feral Interactive)</span>
+                <span class="toggle-desc">Optimize CPU governor, GPU clocks & process priority (requires gamemode package)</span>
+              </div>
+            </label>
+
+            <label class="toggle-row">
+              <input type="checkbox" bind:checked={enableGamescope} />
+              <div class="toggle-info">
+                <span class="toggle-title">Enable Gamescope</span>
+                <span class="toggle-desc">Isolate game inside Valve's Gamescope micro-compositor (requires gamescope package)</span>
+              </div>
+            </label>
           </div>
         </details>
 
@@ -321,7 +393,38 @@
     gap: 0.35rem;
   }
 
-  label {
+  /* Segmented control for Platform */
+  .segmented-control {
+    display: flex;
+    background: #111128;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .segment {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #9090cc;
+    padding: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .segment:hover:not(.active) {
+    background: #181838;
+    color: #c0c0ff;
+  }
+
+  .segment.active {
+    background: #303080;
+    color: #ffffff;
+  }
+
+  label, .group-label {
     font-size: 0.82rem;
     font-weight: 500;
     color: #8888cc;
@@ -459,6 +562,54 @@
 
   .advanced .field {
     margin-top: 0.75rem;
+  }
+
+  .toggle-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed #2a2a4a;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    cursor: pointer;
+    padding: 0.35rem 0.4rem;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  .toggle-row:hover {
+    background: #15152a;
+  }
+
+  .toggle-row input[type="checkbox"] {
+    accent-color: #6060e0;
+    width: 15px;
+    height: 15px;
+    margin-top: 0.15rem;
+    cursor: pointer;
+  }
+
+  .toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .toggle-title {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #d0d0ff;
+  }
+
+  .toggle-desc {
+    font-size: 0.75rem;
+    color: #6060a0;
   }
 
   .modal-actions {

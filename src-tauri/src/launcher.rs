@@ -1,11 +1,14 @@
 use std::fs::{self, File};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use chrono::Utc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
-use crate::models::Game;
+use crate::models::{Game, GamePlatform};
+use crate::process_registry::{ProcessRegistry, RunningProcess};
 use crate::proton::is_umu_installed;
 use crate::store::{load_games, save_games};
 
@@ -121,10 +124,22 @@ fn sanitize_child_env(cmd: &mut Command) {
 /// - Neither `umu-run` nor `<proton_path>/proton` can be found
 /// - `spawn()` itself fails (e.g. permission denied, binary not executable)
 #[tauri::command]
-pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
+pub async fn launch_game(
+    app: AppHandle,
+    registry: State<'_, ProcessRegistry>,
+    game: Game,
+) -> Result<(), String> {
     // ── Pre-flight checks ────────────────────────────────────────────────────
 
-    if !Path::new(&game.exe_path).exists() {
+    {
+        let map = registry.0.lock().unwrap();
+        if map.contains_key(&game.id) {
+            return Err("This game is already running.".to_string());
+        }
+    }
+
+    let exe_path = Path::new(&game.exe_path);
+    if !exe_path.exists() {
         return Err(format!(
             "Game executable not found on disk: '{}'. \
              Has the file been moved or deleted?",
@@ -132,72 +147,118 @@ pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
         ));
     }
 
-    if !Path::new(&game.proton_path).exists() {
-        return Err(format!(
-            "Proton installation directory not found: '{}'. \
-             The Proton version '{}' may have been uninstalled.",
-            game.proton_path, game.proton_version
-        ));
-    }
-
-    // ── Resolve paths ────────────────────────────────────────────────────────
-
-    let prefix = resolve_prefix(&app, &game)?;
     let log_file = open_log_file(&app, &game)?;
-
-    // Clone the file handle so both stdout and stderr point to the same log.
     let log_stderr = log_file
         .try_clone()
         .map_err(|e| format!("Failed to duplicate log file handle: {e}"))?;
 
     let extra_args = split_launch_args(&game.launch_args);
 
-    // ── Choose launch strategy ───────────────────────────────────────────────
+    // `wine_prefix` is `None` for Linux-native games (no Wine layer exists),
+    // and `Some(path)` for Windows/Proton games — this is what lets
+    // `force_quit_game` later decide whether to use `wineserver -k` or fall
+    // back straight to a process-group signal.
+    let (base_bin, base_args, env_vars, wine_prefix) = if game.platform == GamePlatform::Linux {
+        // ── Linux Native Launch ──────────────────────────────────────────────
+        let metadata = fs::metadata(exe_path)
+            .map_err(|e| format!("Failed to read metadata for '{}': {e}", game.exe_path))?;
 
-    let mut cmd = if is_umu_installed() {
-        // ── Primary: umu-run ────────────────────────────────────────────────
-        //
-        // umu-run <exe_path> [extra args…]
-        //   WINEPREFIX  = resolved prefix directory
-        //   PROTONPATH  = absolute path to the Proton install
-        let mut c = Command::new("umu-run");
-        c.arg(&game.exe_path);
-        c.args(&extra_args);
-        c.env("WINEPREFIX", prefix.as_os_str());
-        c.env("PROTONPATH", &game.proton_path);
-        c
-    } else {
-        // ── Fallback: bare Proton binary ─────────────────────────────────────
-        //
-        // <proton_path>/proton run <exe_path> [extra args…]
-        //   STEAM_COMPAT_DATA_PATH          = resolved prefix directory
-        //   STEAM_COMPAT_CLIENT_INSTALL_PATH = native / Flatpak Steam root
-
-        let proton_bin = PathBuf::from(&game.proton_path).join("proton");
-        if !proton_bin.exists() {
+        if metadata.permissions().mode() & 0o111 == 0 {
             return Err(format!(
-                "Cannot launch '{}': neither 'umu-run' was found on PATH \
-                 nor the Proton binary exists at '{}'. \
-                 Install umu-launcher or verify your Proton installation.",
-                game.name,
-                proton_bin.display()
+                "The file '{}' is not marked as executable. \
+                 Please ensure it has execute permissions (e.g. chmod +x).",
+                game.exe_path
             ));
         }
 
-        let steam_root = resolve_steam_root().ok_or_else(|| {
-            "Proton fallback launch failed: could not locate a Steam installation \
-             directory (checked native and Flatpak paths)."
-                .to_owned()
+        (game.exe_path.clone(), extra_args, vec![], None)
+    } else {
+        // ── Windows (Proton) Launch ──────────────────────────────────────────
+
+        let proton_path = game.proton_path.as_deref().ok_or_else(|| {
+            format!("Proton path is missing for Windows game '{}'.", game.name)
         })?;
 
-        let mut c = Command::new(&proton_bin);
-        c.arg("run");
-        c.arg(&game.exe_path);
-        c.args(&extra_args);
-        c.env("STEAM_COMPAT_DATA_PATH", prefix.as_os_str());
-        c.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", steam_root.as_os_str());
-        c
+        let proton_version = game.proton_version.as_deref().unwrap_or("Unknown");
+
+        if !Path::new(proton_path).exists() {
+            return Err(format!(
+                "Proton installation directory not found: '{}'. \
+                 The Proton version '{}' may have been uninstalled.",
+                proton_path, proton_version
+            ));
+        }
+
+        let prefix = resolve_prefix(&app, &game)?;
+        let prefix_for_registry = prefix.clone();
+
+        if is_umu_installed() {
+            // Primary: umu-run
+            let mut args = vec![game.exe_path.clone()];
+            args.extend(extra_args);
+            let envs = vec![
+                ("WINEPREFIX".to_string(), prefix.to_string_lossy().to_string()),
+                ("PROTONPATH".to_string(), proton_path.to_string()),
+            ];
+            ("umu-run".to_string(), args, envs, Some(prefix_for_registry))
+        } else {
+            // Fallback: bare Proton binary
+            let proton_bin = PathBuf::from(proton_path).join("proton");
+            if !proton_bin.exists() {
+                return Err(format!(
+                    "Cannot launch '{}': neither 'umu-run' was found on PATH \
+                     nor the Proton binary exists at '{}'. \
+                     Install umu-launcher or verify your Proton installation.",
+                    game.name,
+                    proton_bin.display()
+                ));
+            }
+
+            let steam_root = resolve_steam_root().ok_or_else(|| {
+                "Proton fallback launch failed: could not locate a Steam installation \
+                 directory (checked native and Flatpak paths)."
+                    .to_owned()
+            })?;
+
+            let mut args = vec!["run".to_string(), game.exe_path.clone()];
+            args.extend(extra_args);
+            let envs = vec![
+                ("STEAM_COMPAT_DATA_PATH".to_string(), prefix.to_string_lossy().to_string()),
+                ("STEAM_COMPAT_CLIENT_INSTALL_PATH".to_string(), steam_root.to_string_lossy().to_string()),
+            ];
+            (proton_bin.to_string_lossy().to_string(), args, envs, Some(prefix_for_registry))
+        }
     };
+
+    // ── Apply MangoHud & Feral GameMode wrappers ────────────────────────────
+    let mut final_bin = base_bin;
+    let mut final_args = base_args;
+
+    if game.enable_mangohud {
+        final_args.insert(0, final_bin);
+        final_bin = "mangohud".to_string();
+    }
+
+    if game.enable_gamemode {
+        final_args.insert(0, final_bin);
+        final_bin = "gamemoderun".to_string();
+    }
+
+    if game.enable_gamescope {
+        final_args.insert(0, "--".to_string());
+        final_args.insert(1, final_bin);
+        final_bin = "gamescope".to_string();
+    }
+
+    let mut cmd = Command::new(&final_bin);
+    cmd.args(&final_args);
+    for (k, v) in env_vars {
+        cmd.env(k, v);
+    }
+
+    if game.enable_mangohud {
+        cmd.env("MANGOHUD", "1");
+    }
 
     // Strip AppImage-injected runtime variables (PYTHONHOME, PYTHONPATH,
     // LD_LIBRARY_PATH, etc.) so umu-run's/Proton's own Python and dynamic
@@ -214,17 +275,99 @@ pub async fn launch_game(app: AppHandle, game: Game) -> Result<(), String> {
     // Detach stdin so the child never blocks waiting for terminal input.
     cmd.stdin(Stdio::null());
 
-    // ── Spawn (non-blocking) ─────────────────────────────────────────────────
-    // .spawn() returns as soon as the OS hands the child its PID.
-    // We intentionally drop the Child handle — the process runs independently.
+    // Put the spawned process into its OWN new process group (pgid == its
+    // own pid) instead of inheriting ours. This is a secondary/fallback
+    // cleanup mechanism used by force_quit_game: sufficient on its own for
+    // Linux-native games (no sandboxing layers), but NOT sufficient alone
+    // for Proton games — pressure-vessel's sandboxing (srt-bwrap,
+    // pv-adverb) calls setsid() at nearly every layer of the launch chain,
+    // decoupling wineserver/winedevice.exe/the game .exe into entirely
+    // separate process groups and sessions. For those, force_quit_game
+    // primarily relies on `wineserver -k` against `wine_prefix` instead.
+    cmd.process_group(0);
 
-    cmd.spawn().map_err(|e| {
+    // ── Spawn (non-blocking) ─────────────────────────────────────────────────
+
+    let child = cmd.spawn().map_err(|e| {
         format!(
             "Failed to spawn launcher process for '{}': {e}. \
              Check file permissions and that the binary is executable.",
             game.name
         )
     })?;
+
+    let game_id = game.id.clone();
+    let pid = child.id();
+
+    {
+        let mut map = registry.0.lock().unwrap();
+        map.insert(
+            game_id.clone(),
+            RunningProcess {
+                child,
+                game_id: game_id.clone(),
+                started_at: Utc::now(),
+                pid,
+                wine_prefix,
+            },
+        );
+    }
+
+    // ── Background Monitor ───────────────────────────────────────────────────
+
+    let app_clone = app.clone();
+    let game_id_clone = game_id.clone();
+
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+            let mut exited = false;
+            let mut exit_success = false;
+            let mut started_at = Utc::now(); // Fallback
+
+            {
+                let registry = app_clone.state::<ProcessRegistry>();
+                let mut map = registry.0.lock().unwrap();
+
+                if let Some(rp) = map.get_mut(&game_id_clone) {
+                    match rp.child.try_wait() {
+                        Ok(Some(status)) => {
+                            exited = true;
+                            exit_success = status.success();
+                            started_at = rp.started_at;
+                        }
+                        Ok(None) => {
+                            // Still running
+                        }
+                        Err(_) => {
+                            // Error calling try_wait, assume dead
+                            exited = true;
+                            started_at = rp.started_at;
+                        }
+                    }
+                } else {
+                    // Not in map anymore (e.g. force_quit_game already
+                    // removed it and emitted its own "game-stopped" event)
+                    break;
+                }
+
+                if exited {
+                    map.remove(&game_id_clone);
+                }
+            } // drop map lock
+
+            if exited {
+                crate::process_registry::accumulate_playtime_and_emit(
+                    &app_clone,
+                    &game_id_clone,
+                    started_at,
+                    exit_success,
+                );
+                break;
+            }
+        }
+    });
 
     // ── Persist last_played timestamp ─────────────────────────────────────────
 

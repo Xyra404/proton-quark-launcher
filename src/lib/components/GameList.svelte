@@ -1,17 +1,29 @@
 <script lang="ts">
-  import { listGames, removeGame, launchGame } from '$lib/api';
-  import type { Game } from '$lib/types';
+  import { listGames, removeGame, launchGame, addGameToCollection, removeGameFromCollection, listRunningGameIds, forceQuitGame } from '$lib/api';
+  import { listen } from '@tauri-apps/api/event';
+  import type { Game, Collection } from '$lib/types';
   import Toast from './Toast.svelte';
   import AddGameModal from './AddGameModal.svelte';
 
+  interface Props {
+    collections: Collection[];
+    selectedCollectionId: string;
+    oncollectionschanged: () => void;
+  }
+
+  let { collections, selectedCollectionId, oncollectionschanged }: Props = $props();
+
   // ── State ────────────────────────────────────────────────────────────────────
-  let games = $state<Game[]>([]);
+  let allGames = $state<Game[]>([]);
   let loading = $state(true);
   let loadError = $state('');
   let toastMsg = $state('');
 
   // Track which game IDs are currently mid-launch (for per-button spinner).
   let launchingIds = $state<Set<string>>(new Set());
+
+  // Track running games
+  let runningGames = $state<Set<string>>(new Set());
 
   let addModalOpen = $state(false);
   let gameToEdit = $state<Game | undefined>(undefined);
@@ -20,16 +32,91 @@
   let pendingDeleteIds = $state<Set<string>>(new Set());
   let deleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  // ── Load games on mount ───────────────────────────────────────────────────────
+  // ── Collection Popover State ───────────────────────────────────────────────
+  let popoverOpenForGame = $state<string | null>(null);
+  let popoverX = $state(0);
+  let popoverY = $state(0);
+
+  function openPopover(e: MouseEvent, gameId: string) {
+    const btn = e.currentTarget as HTMLElement;
+    const rect = btn.getBoundingClientRect();
+    popoverX = rect.left - 180; // approximate width offset
+    popoverY = rect.bottom + 8;
+    popoverOpenForGame = gameId;
+  }
+
+  function closePopover() {
+    popoverOpenForGame = null;
+  }
+
+  function handleWindowClick(e: MouseEvent) {
+    if (!popoverOpenForGame) return;
+    const target = e.target as HTMLElement;
+    if (!target.closest('.collection-popover') && !target.closest('.btn-col')) {
+      closePopover();
+    }
+  }
+
+  async function toggleCollectionMembership(coll: Collection, gameId: string) {
+    const hasGame = coll.game_ids.includes(gameId);
+    try {
+      if (hasGame) {
+        await removeGameFromCollection(coll.id, gameId);
+      } else {
+        await addGameToCollection(coll.id, gameId);
+      }
+      oncollectionschanged();
+    } catch (e: unknown) {
+      toastMsg = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // ── Derived View ───────────────────────────────────────────────────────────
+  let displayedGames = $derived.by(() => {
+    if (selectedCollectionId === 'all') return allGames;
+
+    if (selectedCollectionId === 'uncategorized') {
+      const allCategorizedIds = new Set(collections.flatMap(c => c.game_ids));
+      return allGames.filter(g => !allCategorizedIds.has(g.id));
+    }
+
+    const coll = collections.find(c => c.id === selectedCollectionId);
+    if (!coll) return [];
+    const ids = new Set(coll.game_ids);
+    return allGames.filter(g => ids.has(g.id));
+  });
+
+  // ── Load games & states on mount ─────────────────────────────────────────────
   $effect(() => {
     fetchGames();
+
+    listRunningGameIds()
+      .then(ids => {
+        runningGames = new Set(ids);
+      })
+      .catch(e => console.error("Failed to load running games:", e));
+
+    const unlistenPromise = listen<{ game_id: string, exit_success: boolean, session_seconds: number, total_playtime_seconds: number }>('game-stopped', (event) => {
+      runningGames = new Set([...runningGames].filter(id => id !== event.payload.game_id));
+      
+      const game = allGames.find(g => g.id === event.payload.game_id);
+      if (game) {
+        game.total_playtime_seconds = event.payload.total_playtime_seconds;
+      }
+
+      fetchGames(); // Refresh UI to update last_played
+    });
+
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
   });
 
   async function fetchGames() {
     loading = true;
     loadError = '';
     try {
-      games = await listGames();
+      allGames = await listGames();
     } catch (e: unknown) {
       loadError = e instanceof Error ? e.message : String(e);
     } finally {
@@ -42,12 +129,21 @@
     launchingIds = new Set([...launchingIds, game.id]);
     try {
       await launchGame(game);
+      runningGames = new Set([...runningGames, game.id]);
       // Refresh so last_played updates in the UI.
       await fetchGames();
     } catch (e: unknown) {
       toastMsg = e instanceof Error ? e.message : String(e);
     } finally {
       launchingIds = new Set([...launchingIds].filter((id) => id !== game.id));
+    }
+  }
+
+  async function handleForceQuit(game: Game) {
+    try {
+      await forceQuitGame(game.id);
+    } catch (e: unknown) {
+      toastMsg = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -61,7 +157,9 @@
       
       try {
         await removeGame(game.id);
-        games = games.filter((g) => g.id !== game.id);
+        allGames = allGames.filter((g) => g.id !== game.id);
+        // Also fire collections callback since deleting a game cleans it from collections
+        oncollectionschanged();
       } catch (e: unknown) {
         toastMsg = e instanceof Error ? e.message : String(e);
       }
@@ -101,7 +199,22 @@
       return iso;
     }
   }
+
+  function formatPlaytime(seconds?: number): string {
+    if (!seconds) return 'Never played';
+    if (seconds < 60) return '< 1m played';
+    
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    
+    if (hours > 0) {
+      return `${hours}h ${mins}m played`;
+    }
+    return `${mins}m played`;
+  }
 </script>
+
+<svelte:window onclick={handleWindowClick} />
 
 <div class="game-list-root">
   <div class="list-header">
@@ -109,7 +222,7 @@
       <span class="title-icon">🎮</span>
       My Games
       {#if !loading}
-        <span class="count-badge">{games.length}</span>
+        <span class="count-badge">{displayedGames.length}</span>
       {/if}
     </h2>
     <button class="add-btn" onclick={() => (addModalOpen = true)}>
@@ -127,44 +240,80 @@
       <span>Failed to load games: {loadError}</span>
       <button class="retry-btn" onclick={fetchGames}>Retry</button>
     </div>
-  {:else if games.length === 0}
+  {:else if displayedGames.length === 0}
     <div class="empty-state">
       <div class="empty-icon">📂</div>
-      <p>No games added yet.</p>
-      <p class="empty-sub">Click <strong>Add Game</strong> to get started.</p>
+      {#if selectedCollectionId !== 'all'}
+        <p>No games in this collection.</p>
+      {:else}
+        <p>No games added yet.</p>
+        <p class="empty-sub">Click <strong>Add Game</strong> to get started.</p>
+      {/if}
     </div>
   {:else}
     <ul class="game-cards" aria-label="Game library">
-      {#each games as game (game.id)}
+      {#each displayedGames as game (game.id)}
         {@const isLaunching = launchingIds.has(game.id)}
         <li class="game-card">
           <div class="card-body">
             <div class="game-info">
               <span class="game-name">{game.name}</span>
               <span class="game-meta">
-                <span class="meta-proton" title={game.proton_path}>
-                  ⚙ {game.proton_version}
-                </span>
+                {#if game.platform === 'Linux'}
+                  <span class="meta-proton" title="Linux Native">
+                    🐧 Native
+                  </span>
+                {:else}
+                  <span class="meta-proton" title={game.proton_path}>
+                    ⊞ {game.proton_version}
+                  </span>
+                {/if}
                 <span class="meta-sep">·</span>
                 <span class="meta-played" title={game.last_played ?? ''}>
                   🕐 {formatDate(game.last_played)}
+                </span>
+                <span class="meta-sep">·</span>
+                <span class="meta-playtime">
+                  ⏱ {formatPlaytime(game.total_playtime_seconds)}
                 </span>
               </span>
               <span class="game-exe" title={game.exe_path}>{game.exe_path}</span>
             </div>
 
             <div class="card-actions">
+              {#if runningGames.has(game.id)}
+                <div class="running-badge">
+                  <span class="pulse-dot"></span> Running
+                </div>
+                <button
+                  class="btn-launch force-quit"
+                  onclick={() => handleForceQuit(game)}
+                  aria-label="Force quit {game.name}"
+                >
+                  ⏹ Force Quit
+                </button>
+              {:else}
+                <button
+                  class="btn-launch"
+                  onclick={() => handleLaunch(game)}
+                  disabled={isLaunching}
+                  aria-label="Launch {game.name}"
+                >
+                  {#if isLaunching}
+                    <span class="btn-spinner"></span> Launching…
+                  {:else}
+                    ▶ Launch
+                  {/if}
+                </button>
+              {/if}
               <button
-                class="btn-launch"
-                onclick={() => handleLaunch(game)}
-                disabled={isLaunching}
-                aria-label="Launch {game.name}"
+                class="btn-icon btn-col"
+                class:active={popoverOpenForGame === game.id}
+                onclick={(e) => openPopover(e, game.id)}
+                aria-label="Manage collections for {game.name}"
+                title="Collections"
               >
-                {#if isLaunching}
-                  <span class="btn-spinner"></span> Launching…
-                {:else}
-                  ▶ Launch
-                {/if}
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
               </button>
               <button
                 class="btn-icon btn-edit"
@@ -190,6 +339,34 @@
     </ul>
   {/if}
 </div>
+
+<!-- Collection Popover -->
+{#if popoverOpenForGame}
+  <div
+    class="collection-popover"
+    style="left: {popoverX}px; top: {popoverY}px;"
+  >
+    <div class="popover-title">Add to Collection</div>
+    {#if collections.length === 0}
+      <div class="popover-empty">No collections exist yet.</div>
+    {:else}
+      <ul class="popover-list">
+        {#each collections as coll (coll.id)}
+          <li class="popover-item">
+            <label class="popover-label">
+              <input
+                type="checkbox"
+                checked={coll.game_ids.includes(popoverOpenForGame)}
+                onchange={() => toggleCollectionMembership(coll, popoverOpenForGame!)}
+              />
+              <span class="col-name">{coll.name}</span>
+            </label>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
+{/if}
 
 <!-- Add/Edit Game Modal -->
 <AddGameModal
@@ -422,6 +599,45 @@
     cursor: not-allowed;
   }
 
+  .btn-launch.force-quit {
+    background: #4a1a1a;
+    border-color: #8a2a2a;
+    color: #ff8080;
+  }
+
+  .btn-launch.force-quit:hover {
+    background: #6a2a2a;
+    border-color: #aa3a3a;
+  }
+
+  .running-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #70e070;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0 0.5rem;
+    background: rgba(40, 90, 40, 0.2);
+    border: 1px solid rgba(110, 220, 110, 0.3);
+    border-radius: 6px;
+    height: 32px;
+  }
+
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #70e070;
+    animation: pulse-green 2s infinite;
+  }
+
+  @keyframes pulse-green {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(112, 224, 112, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 4px rgba(112, 224, 112, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(112, 224, 112, 0); }
+  }
+
   .btn-icon {
     background: none;
     border: 1px solid transparent;
@@ -460,5 +676,95 @@
     font-size: 0.8rem;
     font-weight: 500;
     padding: 0.4rem 0.6rem;
+  }
+
+  .btn-col {
+    color: #a0a0c0;
+    display: flex;
+    align-items: center;
+  }
+
+  .btn-col:hover,
+  .btn-col.active {
+    background: #1a1a3a;
+    border-color: #30305a;
+    color: #d0d0ff;
+  }
+
+  /* ── Collection Popover ─────────────────────────────────────────────────── */
+  .collection-popover {
+    position: fixed;
+    background: #1a1a35;
+    border: 1px solid #30305a;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    min-width: 180px;
+    max-width: 240px;
+    z-index: 1000;
+  }
+
+  .popover-title {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6060a0;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+    padding: 0 0.25rem;
+  }
+
+  .popover-empty {
+    font-size: 0.8rem;
+    color: #8080a0;
+    font-style: italic;
+    padding: 0.25rem;
+  }
+
+  .popover-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .popover-item {
+    display: flex;
+  }
+
+  .popover-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.35rem 0.25rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: #c0c0e0;
+    border-radius: 4px;
+  }
+
+  .popover-label:hover {
+    background: #252550;
+    color: #fff;
+  }
+
+  .popover-label input[type="checkbox"] {
+    accent-color: #6060e0;
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+  }
+
+  .col-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

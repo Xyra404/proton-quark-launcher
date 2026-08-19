@@ -1,17 +1,31 @@
 <script lang="ts">
-  import { isUmuInstalled } from '$lib/api';
+  import { isUmuInstalled, listCollections } from '$lib/api';
   import { openUrl } from '@tauri-apps/plugin-opener';
+  import type { Collection } from '$lib/types';
   import GameList from '$lib/components/GameList.svelte';
+  import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
+  import CollectionSidebar from '$lib/components/CollectionSidebar.svelte';
 
   let umuPresent = $state<boolean | null>(null);
+  let settingsOpen = $state(false);
+
+  // Collections state
+  let collections = $state<Collection[]>([]);
+  let selectedCollectionId = $state<string>('all');
+
+  function fetchCollections() {
+    listCollections().then((cols) => {
+      collections = cols;
+    }).catch(console.error);
+  }
 
   $effect(() => {
     isUmuInstalled().then((result) => {
       umuPresent = result;
     }).catch(() => {
-      // If the check itself fails, assume present — don't alarm the user.
       umuPresent = true;
     });
+    fetchCollections();
   });
 
   async function openUmuLink(e: MouseEvent) {
@@ -32,37 +46,62 @@
       <span class="brand-icon">⚛</span>
       <span class="brand-name">Proton Quark Launcher</span>
     </div>
-    <div class="header-status">
+    <div class="header-actions">
+      <!-- Settings Icon Button -->
+      <button
+        class="settings-btn"
+        onclick={() => (settingsOpen = true)}
+        aria-label="Open settings"
+        title="Settings"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Two-column main layout -->
+  <div class="app-body">
+    <CollectionSidebar
+      {collections}
+      selectedId={selectedCollectionId}
+      onselect={(id) => (selectedCollectionId = id)}
+      oncollectionschanged={fetchCollections}
+    />
+
+    <main class="app-content">
+      <GameList
+        {collections}
+        selectedCollectionId={selectedCollectionId}
+        oncollectionschanged={fetchCollections}
+      />
+    </main>
+  </div>
+
+  <!-- App Footer -->
+  <footer class="app-footer">
+    <div class="footer-status">
       {#if umuPresent === true}
         <span class="status-dot ok" title="umu-launcher detected"></span>
         <span class="status-label">umu-launcher ready</span>
       {:else if umuPresent === false}
         <span class="status-dot warn" title="umu-launcher not found"></span>
-        <span class="status-label warn">Fallback mode</span>
+        <span class="status-label warn">
+          <strong>Fallback mode:</strong> umu-launcher not detected (using raw Proton).
+          <!-- svelte-ignore a11y_missing_attribute -->
+          <a href="https://github.com/Open-Wine-Components/umu-launcher" onclick={openUmuLink}>
+            Install umu-launcher
+          </a>
+        </span>
       {/if}
     </div>
-  </header>
-
-  <!-- umu warning banner -->
-  {#if umuPresent === false}
-    <div class="umu-banner" role="alert">
-      <span class="banner-icon">⚠</span>
-      <span class="banner-text">
-        <strong>umu-launcher not detected.</strong>
-        Games will fall back to running raw Proton directly, which may be less compatible.
-        For the best experience, install
-        <!-- svelte-ignore a11y_missing_attribute -->
-        <a href="https://github.com/Open-Wine-Components/umu-launcher" onclick={openUmuLink}>
-          umu-launcher
-        </a>.
-      </span>
-    </div>
-  {/if}
-
-  <main class="app-content">
-    <GameList />
-  </main>
+  </footer>
 </div>
+
+<!-- Settings Drawer -->
+<SettingsDrawer bind:open={settingsOpen} onclose={() => (settingsOpen = false)} />
 
 <style>
   :global(*), :global(*::before), :global(*::after) {
@@ -96,7 +135,15 @@
   .app-shell {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── App Body (Two Columns) ──────────────────────────────────────────────── */
+  .app-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden; /* Sidebar internal scrolling */
   }
 
   /* ── Header ──────────────────────────────────────────────────────────────── */
@@ -136,77 +183,84 @@
     color: #c0c0ff;
   }
 
-  .header-status {
+  .header-actions {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.5rem;
   }
 
-  .status-dot {
-    width: 8px;
-    height: 8px;
+  .settings-btn {
+    background: none;
+    border: 1px solid transparent;
     border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .status-dot.ok   { background: #40c040; box-shadow: 0 0 6px #40c04088; }
-  .status-dot.warn { background: #e09020; box-shadow: 0 0 6px #e0902088; }
-
-  .status-label {
-    font-size: 0.78rem;
     color: #5050a0;
-  }
-
-  .status-label.warn { color: #a06020; }
-
-  /* ── UMU warning banner ──────────────────────────────────────────────────── */
-  .umu-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    background: #1a1200;
-    border-bottom: 1px solid #4a3a00;
-    padding: 0.75rem 1.5rem;
-    animation: banner-in 0.2s ease-out;
-  }
-
-  @keyframes banner-in {
-    from { opacity: 0; transform: translateY(-6px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  .banner-icon {
-    color: #c08020;
-    font-size: 1rem;
-    flex-shrink: 0;
-    margin-top: 0.05rem;
-  }
-
-  .banner-text {
-    font-size: 0.84rem;
-    color: #b09040;
-    line-height: 1.5;
-  }
-
-  .banner-text strong {
-    color: #d0b050;
-  }
-
-  .banner-text a {
-    color: #80a0e0;
-    text-decoration: underline;
-    text-underline-offset: 2px;
     cursor: pointer;
+    padding: 0.35rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.25s;
   }
 
-  .banner-text a:hover { color: #a0c0ff; }
+  .settings-btn:hover {
+    color: #a0a0ff;
+    border-color: #2a2a60;
+    background: #1a1a38;
+    transform: rotate(45deg);
+  }
 
   /* ── Main content ────────────────────────────────────────────────────────── */
   .app-content {
     flex: 1;
     padding: 1.75rem 2rem;
-    max-width: 900px;
-    width: 100%;
-    margin: 0 auto;
+    overflow-y: auto;
+  }
+
+  /* ── Footer ───────────────────────────────────────────────────────────────── */
+  .app-footer {
+    height: 36px;
+    background: #080814;
+    border-top: 1px solid #1a1a38;
+    display: flex;
+    align-items: center;
+    padding: 0 1.25rem;
+    font-size: 0.76rem;
+    flex-shrink: 0;
+  }
+
+  .footer-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #6060a0;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .status-dot.ok   { background: #40c040; box-shadow: 0 0 5px #40c04088; }
+  .status-dot.warn { background: #e09020; box-shadow: 0 0 5px #e0902088; }
+
+  .status-label {
+    color: #5050a0;
+  }
+
+  .status-label.warn {
+    color: #a07030;
+  }
+
+  .status-label a {
+    color: #7090d0;
+    text-decoration: underline;
+    margin-left: 0.25rem;
+    cursor: pointer;
+  }
+
+  .status-label a:hover {
+    color: #90b0ff;
   }
 </style>

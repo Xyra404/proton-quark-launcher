@@ -93,9 +93,13 @@ fn scan_dir(
     }
 }
 
+use crate::custom_proton::load_custom_proton_paths;
+use tauri::AppHandle;
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
-/// Discovers every Proton installation available on this system.
+/// Discovers every Proton installation available on this system, including auto-detected
+/// and user-registered custom Proton paths.
 ///
 /// Search order (each directory is skipped if it doesn't exist):
 /// 1. `~/.steam/steam/compatibilitytools.d/`                       — all subfolders
@@ -104,8 +108,9 @@ fn scan_dir(
 /// 4. `~/.var/app/com.valvesoftware.Steam/…/steamapps/common/`     — "Proton*" only (Flatpak)
 /// 5. `~/.var/app/com.valvesoftware.Steam/…/compatibilitytools.d/` — all subfolders (Flatpak)
 /// 6. `/var/lib/flatpak/…/share/steam/compatibilitytools.d/`       — all subfolders (Flatpak system-wide)
+/// 7. Custom Proton paths saved in `custom_proton_paths.json`
 #[tauri::command]
-pub fn list_proton_versions() -> Result<Vec<ProtonInstall>, String> {
+pub fn list_proton_versions(app: AppHandle) -> Result<Vec<ProtonInstall>, String> {
     let home = dirs::home_dir().ok_or("Could not resolve home directory")?;
 
     // Predicate that passes any subfolder whose name contains "proton"
@@ -154,8 +159,38 @@ pub fn list_proton_versions() -> Result<Vec<ProtonInstall>, String> {
     let mut installs: Vec<ProtonInstall> = Vec::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
 
+    // 1. Scan standard auto-discovery search paths
     for (dir, filter) in search_paths {
         scan_dir(dir, *filter, &mut installs, &mut seen);
+    }
+
+    // 2. Scan user-registered custom Proton paths from custom_proton_paths.json
+    if let Ok(custom_paths) = load_custom_proton_paths(&app) {
+        for path_str in custom_paths {
+            let path = Path::new(&path_str);
+            if !path.is_dir() || !has_proton_executable(path) {
+                continue;
+            }
+
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_owned(),
+                None => continue,
+            };
+
+            let canonical = match path.canonicalize() {
+                Ok(p) => p,
+                Err(_) => path.to_path_buf(),
+            };
+
+            if !seen.insert(canonical.clone()) {
+                continue;
+            }
+
+            installs.push(ProtonInstall {
+                name,
+                path: canonical.to_string_lossy().into_owned(),
+            });
+        }
     }
 
     // Sort alphabetically by name for stable UI ordering.

@@ -1,3 +1,5 @@
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
@@ -41,10 +43,38 @@ pub(crate) fn save_games(app: &AppHandle, games: &[Game]) -> Result<(), String> 
 
 // ─── Tauri Commands ──────────────────────────────────────────────────────────
 
+fn validate_game_executable(game: &Game) -> Result<(), String> {
+    let path = Path::new(&game.exe_path);
+    
+    if !path.exists() {
+        return Err(format!("Executable path does not exist: {}", game.exe_path));
+    }
+
+    match game.platform {
+        crate::models::GamePlatform::Windows => {
+            if !game.exe_path.to_lowercase().ends_with(".exe") {
+                return Err("Windows games must use a .exe executable file.".to_string());
+            }
+        }
+        crate::models::GamePlatform::Linux => {
+            let metadata = std::fs::metadata(path)
+                .map_err(|e| format!("Failed to read metadata for executable: {e}"))?;
+            
+            if metadata.permissions().mode() & 0o111 == 0 {
+                return Err("Linux native game executable must have execute permissions (chmod +x).".to_string());
+            }
+        }
+    }
+    
+    Ok(())
+}
+
 /// Adds a new game to the persistent store.
 /// The caller is responsible for setting a unique `id` (UUID v4).
 #[tauri::command]
 pub fn add_game(app: AppHandle, game: Game) -> Result<(), String> {
+    validate_game_executable(&game)?;
+
     let mut games = load_games(&app)?;
 
     if games.iter().any(|g| g.id == game.id) {
@@ -73,13 +103,20 @@ pub fn remove_game(app: AppHandle, id: String) -> Result<(), String> {
         return Err(format!("No game found with id '{id}'."));
     }
 
-    save_games(&app, &games)
+    save_games(&app, &games)?;
+
+    // Cleanup: Ensure this game is also removed from any collections it belonged to.
+    crate::collections::remove_game_from_all_collections(&app, &id)?;
+
+    Ok(())
 }
 
 /// Replaces an existing game (matched by `game.id`) with the updated struct.
 /// Returns an error if no game with that id exists.
 #[tauri::command]
 pub fn update_game(app: AppHandle, game: Game) -> Result<(), String> {
+    validate_game_executable(&game)?;
+
     let mut games = load_games(&app)?;
 
     let entry = games
