@@ -73,18 +73,20 @@ jobs:
             fi
           done
 
-      - name: Sync version from package.json into tauri.conf.json
+      # tauri.conf.json is the single source of truth for versioning.
+      # This step reads its "version" field and writes that same value into
+      # package.json, so the two never drift — bump the version in
+      # tauri.conf.json only, and this keeps npm/package.json in lockstep.
+      - name: Sync version from tauri.conf.json into package.json
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          echo "Syncing version: $PKG_VERSION"
-          jq --arg v "$PKG_VERSION" '.version = $v' \
-            src-tauri/tauri.conf.json > src-tauri/tauri.conf.tmp.json
-          mv src-tauri/tauri.conf.tmp.json src-tauri/tauri.conf.json
+          TAURI_VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          echo "Syncing version: $TAURI_VERSION"
+          npm pkg set version="$TAURI_VERSION"
 
       - name: Verify version sync
         run: |
-          echo "package.json version: $(node -p "require('./package.json').version")"
           echo "tauri.conf.json version: $(jq -r '.version' src-tauri/tauri.conf.json)"
+          echo "package.json version: $(node -p "require('./package.json').version")"
 
       - name: Build Linux bundles (AppImage, deb, rpm)
         run: npm run tauri build -- --bundles deb,rpm,appimage
@@ -92,7 +94,7 @@ jobs:
       - name: Locate build artifacts
         id: artifacts
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           find src-tauri/target/release/bundle -maxdepth 2 -type f \
             \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \)

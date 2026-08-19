@@ -1,0 +1,2 @@
+- user added proton folders
+- linux native games
