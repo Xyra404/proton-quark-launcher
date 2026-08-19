@@ -2,8 +2,10 @@
   import { isUmuInstalled } from '$lib/api';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import GameList from '$lib/components/GameList.svelte';
+  import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
 
   let umuPresent = $state<boolean | null>(null);
+  let settingsOpen = $state(false);
 
   $effect(() => {
     isUmuInstalled().then((result) => {
@@ -40,6 +42,19 @@
         <span class="status-dot warn" title="umu-launcher not found"></span>
         <span class="status-label warn">Fallback mode</span>
       {/if}
+
+      <!-- Settings Icon Button -->
+      <button
+        class="settings-btn"
+        onclick={() => (settingsOpen = true)}
+        aria-label="Open settings"
+        title="Settings"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
     </div>
   </header>
 
@@ -63,6 +78,9 @@
     <GameList />
   </main>
 </div>
+
+<!-- Settings Drawer -->
+<SettingsDrawer bind:open={settingsOpen} onclose={() => (settingsOpen = false)} />
 
 <style>
   :global(*), :global(*::before), :global(*::after) {
@@ -158,6 +176,27 @@
   }
 
   .status-label.warn { color: #a06020; }
+
+  .settings-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 50%;
+    color: #5050a0;
+    cursor: pointer;
+    padding: 0.35rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0.5rem;
+    transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.25s;
+  }
+
+  .settings-btn:hover {
+    color: #a0a0ff;
+    border-color: #2a2a60;
+    background: #1a1a38;
+    transform: rotate(45deg);
+  }
 
   /* ── UMU warning banner ──────────────────────────────────────────────────── */
   .umu-banner {

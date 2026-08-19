@@ -47,3 +47,18 @@ export async function isUmuInstalled(): Promise<boolean> {
 export async function launchGame(game: Game): Promise<void> {
   return call<void>('launch_game', { game });
 }
+
+// ─── Custom Proton Paths ────────────────────────────────────────────────────
+
+export async function listCustomProtonPaths(): Promise<string[]> {
+  return call<string[]>('list_custom_proton_paths');
+}
+
+export async function addCustomProtonPath(path: string): Promise<void> {
+  return call<void>('add_custom_proton_path', { path });
+}
+
+export async function removeCustomProtonPath(path: string): Promise<void> {
+  return call<void>('remove_custom_proton_path', { path });
+}
+
