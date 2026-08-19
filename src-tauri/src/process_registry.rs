@@ -47,6 +47,7 @@ pub fn accumulate_playtime_and_emit(
 
 pub struct RunningProcess {
     pub child: Child,
+    #[allow(dead_code)]
     pub game_id: String,
     pub started_at: DateTime<Utc>,
     /// The PID of the immediate child, captured at spawn time via
