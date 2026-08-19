@@ -1,30 +1,36 @@
 name: Build Linux Release
 
-# Fires only when a pull request targeting `main` is merged, and only if
+# Fires only when a pull request targeting `master` is merged, and only if
 # that PR's source branch was `dev`. This is the standard, robust way to
-# detect "dev merged into main" — a plain `push: branches: [main]` trigger
-# would also fire on direct pushes, hotfix PRs, etc.
+# detect "dev merged into master" — a plain `push: branches: [master]`
+# trigger would also fire on direct pushes, hotfix PRs, etc.
+#
+# workflow_dispatch is included so you can manually re-run this from the
+# Actions tab any time, and so GitHub has a way to "index" this workflow
+# the first time it's pushed directly to master.
 on:
   pull_request:
     types: [closed]
-    branches: [main]
+    branches: [master]
+  workflow_dispatch: {}
 
 jobs:
   build-linux:
     # Only proceed if the PR was actually merged (not just closed) and the
-    # source branch was dev. This condition is what scopes the whole job.
+    # source branch was dev. Manual dispatch runs always pass this check.
     if: >
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.ref == 'dev'
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.ref == 'dev')
     runs-on: ubuntu-22.04
     permissions:
       contents: read
 
     steps:
-      - name: Checkout main (post-merge)
+      - name: Checkout master (post-merge)
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: master
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
