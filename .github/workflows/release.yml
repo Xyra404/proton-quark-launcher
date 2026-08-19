@@ -97,6 +97,43 @@ jobs:
           find src-tauri/target/release/bundle -maxdepth 2 -type f \
             \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \)
 
+      # --- EGL_BAD_PARAMETER fix -------------------------------------------
+      # Confirmed root cause: the AppImage bundles Ubuntu 22.04's own
+      # libwayland-client/cursor/egl/server libraries via linuxdeploy. On
+      # systems with a much newer Wayland/Mesa stack (e.g. Arch/CachyOS),
+      # these bundled libraries are version-mismatched against the host's
+      # compositor, causing WebKitGTK to fail EGL initialization with
+      # "Could not create default EGL display: EGL_BAD_PARAMETER" and a
+      # blank white window — even though the exact same build works fine
+      # when done locally on a matching system.
+      #
+      # Fix: delete the bundled libwayland-*.so* files so the binary falls
+      # through to the host's own matching copies at runtime, then repack.
+      - name: Strip bundled libwayland libraries from AppImage
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n1)
+          echo "Repacking: $APPIMAGE"
+
+          chmod +x "$APPIMAGE"
+          "$APPIMAGE" --appimage-extract
+          rm "$APPIMAGE"
+
+          find squashfs-root \( \
+            -path "*/libwayland-client.so*" -o \
+            -path "*/libwayland-cursor.so*" -o \
+            -path "*/libwayland-egl.so*" -o \
+            -path "*/libwayland-server.so*" \
+          \) -print -delete
+
+          # appimagetool releases on the legacy AppImageKit repo 404 —
+          # pull from the maintained AppImage/appimagetool repo instead.
+          curl -L -o appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+
+          # No FUSE available on GitHub-hosted runners.
+          ./appimagetool --appimage-extract-and-run squashfs-root "$APPIMAGE"
+
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
