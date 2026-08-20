@@ -18,6 +18,7 @@
   let loading = $state(true);
   let loadError = $state('');
   let toastMsg = $state('');
+  let searchQuery = $state('');
 
   // Track which game IDs are currently mid-launch (for per-button spinner).
   let launchingIds = $state<Set<string>>(new Set());
@@ -131,17 +132,23 @@
 
   // ── Derived View ───────────────────────────────────────────────────────────
   let displayedGames = $derived.by(() => {
-    if (selectedCollectionId === 'all') return allGames;
+    let gamesInCollection: Game[];
 
-    if (selectedCollectionId === 'uncategorized') {
+    if (selectedCollectionId === 'all') {
+      gamesInCollection = allGames;
+    } else if (selectedCollectionId === 'uncategorized') {
       const allCategorizedIds = new Set(collections.flatMap(c => c.game_ids));
-      return allGames.filter(g => !allCategorizedIds.has(g.id));
+      gamesInCollection = allGames.filter(g => !allCategorizedIds.has(g.id));
+    } else {
+      const coll = collections.find(c => c.id === selectedCollectionId);
+      if (!coll) return [];
+      const ids = new Set(coll.game_ids);
+      gamesInCollection = allGames.filter(g => ids.has(g.id));
     }
 
-    const coll = collections.find(c => c.id === selectedCollectionId);
-    if (!coll) return [];
-    const ids = new Set(coll.game_ids);
-    return allGames.filter(g => ids.has(g.id));
+    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+    if (!normalizedQuery) return gamesInCollection;
+    return gamesInCollection.filter(game => game.name.toLocaleLowerCase().includes(normalizedQuery));
   });
 
   // ── Load games & states on mount ─────────────────────────────────────────────
@@ -283,9 +290,16 @@
         <span class="count-badge">{displayedGames.length}</span>
       {/if}
     </h2>
-    <button class="add-btn" onclick={() => (addModalOpen = true)}>
-      <span>＋</span> Add Game
-    </button>
+    <div class="list-actions">
+      <label class="search-field">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <span class="sr-only">Search games by name</span>
+        <input bind:value={searchQuery} type="search" placeholder="Search games" />
+      </label>
+      <button class="add-btn" onclick={() => (addModalOpen = true)}>
+        <span>＋</span> Add Game
+      </button>
+    </div>
   </div>
 
   {#if loading}
@@ -301,7 +315,10 @@
   {:else if displayedGames.length === 0}
     <div class="empty-state">
       <div class="empty-icon">📂</div>
-      {#if selectedCollectionId !== 'all'}
+      {#if searchQuery.trim()}
+        <p>No games match "{searchQuery}".</p>
+        <p class="empty-sub">Try a different game name.</p>
+      {:else if selectedCollectionId !== 'all'}
         <p>No games in this collection.</p>
       {:else}
         <p>No games added yet.</p>
@@ -456,6 +473,58 @@
     gap: 0.75rem;
   }
 
+  .list-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .search-field {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 220px;
+    padding: 0.48rem 0.7rem;
+    background: #111128;
+    border: 1px solid #292950;
+    border-radius: 7px;
+    color: #7070b0;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .search-field:focus-within {
+    border-color: #6060e0;
+    box-shadow: 0 0 0 2px #4040c033;
+  }
+
+  .search-icon {
+    font-size: 1.15rem;
+    line-height: 1;
+  }
+
+  .search-field input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #d0d0ff;
+  }
+
+  .search-field input::placeholder { color: #606090; }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   .list-title {
     margin: 0;
     font-size: 1.25rem;
@@ -494,6 +563,17 @@
   }
 
   .add-btn:hover { background: #5555d5; }
+
+  @media (max-width: 620px) {
+    .list-actions {
+      width: 100%;
+    }
+
+    .search-field {
+      flex: 1;
+      min-width: 0;
+    }
+  }
 
   /* ── States ─────────────────────────────────────────────────────────────── */
   .state-msg {

@@ -10,6 +10,9 @@ mod process_registry;
 
 use process_registry::{ProcessRegistry, force_quit_game, is_game_running, list_running_game_ids};
 
+#[cfg(target_os = "linux")]
+use gtk::prelude::GtkSettingsExt;
+
 use collections::{
     add_game_to_collection, create_collection, delete_collection, list_collections,
     remove_game_from_collection, rename_collection,
@@ -30,6 +33,14 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), String> {
     tauri::Builder::default()
+        .setup(|_app| {
+            #[cfg(target_os = "linux")]
+            if let Some(settings) = gtk::Settings::default() {
+                settings.set_gtk_application_prefer_dark_theme(true);
+            }
+
+            Ok(())
+        })
         .manage(ProcessRegistry::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
