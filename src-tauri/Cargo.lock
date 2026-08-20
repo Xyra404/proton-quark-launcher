@@ -2831,6 +2831,7 @@ dependencies = [
  "dirs",
  "flate2",
  "futures-util",
+ "gtk",
  "libc",
  "reqwest 0.12.28",
  "serde",
