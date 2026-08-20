@@ -8,6 +8,10 @@ pub enum GamePlatform {
     Linux,
 }
 
+fn default_date_added() -> String {
+    "1970-01-01T00:00:00Z".to_string()
+}
+
 /// Represents a manually added game managed by Proton Quark Launcher.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Game {
@@ -42,6 +46,10 @@ pub struct Game {
     /// ISO 8601 timestamp of the last launch, e.g. "2025-08-19T12:00:00Z".
     /// `None` if the game has never been launched.
     pub last_played: Option<String>,
+
+    /// ISO 8601 UTC timestamp of when the game was added to the library.
+    #[serde(default = "default_date_added")]
+    pub date_added: String,
 
     /// Accumulated play time across all sessions, in seconds.
     #[serde(default)]

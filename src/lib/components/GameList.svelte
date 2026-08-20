@@ -2,6 +2,7 @@
   import { listGames, removeGame, launchGame, addGameToCollection, removeGameFromCollection, listRunningGameIds, forceQuitGame } from '$lib/api';
   import { listen } from '@tauri-apps/api/event';
   import type { Game, Collection } from '$lib/types';
+  import { formatDate, formatPlaytime } from '$lib/utils';
   import Toast from './Toast.svelte';
   import AddGameModal from './AddGameModal.svelte';
 
@@ -19,6 +20,30 @@
   let loadError = $state('');
   let toastMsg = $state('');
   let searchQuery = $state('');
+
+  // ── Sort State ───────────────────────────────────────────────────────────────
+  type SortBy = 'name' | 'playtime' | 'date_added' | 'last_played';
+  type SortDirection = 'asc' | 'desc';
+
+  let sortBy = $state<SortBy>('name');
+  let sortDirection = $state<SortDirection>('desc');
+  let hasSelectedPlaytime = $state(false);
+  let hasSelectedDateAdded = $state(false);
+
+  function handleSortByChange(e: Event) {
+    const target = e.target as HTMLSelectElement;
+    const newSortBy = target.value as SortBy;
+
+    if (newSortBy === 'playtime' && !hasSelectedPlaytime) {
+      hasSelectedPlaytime = true;
+      sortDirection = 'desc';
+    } else if (newSortBy === 'date_added' && !hasSelectedDateAdded) {
+      hasSelectedDateAdded = true;
+      sortDirection = 'desc';
+    }
+
+    sortBy = newSortBy;
+  }
 
   // Track which game IDs are currently mid-launch (for per-button spinner).
   let launchingIds = $state<Set<string>>(new Set());
@@ -147,8 +172,26 @@
     }
 
     const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
-    if (!normalizedQuery) return gamesInCollection;
-    return gamesInCollection.filter(game => game.name.toLocaleLowerCase().includes(normalizedQuery));
+    let filteredGames = gamesInCollection;
+    if (normalizedQuery) {
+      filteredGames = gamesInCollection.filter(game => game.name.toLocaleLowerCase().includes(normalizedQuery));
+    }
+
+    // Apply sorting after filtering
+    return [...filteredGames].sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === 'name') {
+        cmp = a.name.localeCompare(b.name);
+      } else if (sortBy === 'playtime') {
+        cmp = (a.total_playtime_seconds || 0) - (b.total_playtime_seconds || 0);
+      } else if (sortBy === 'date_added') {
+        cmp = (a.date_added || '').localeCompare(b.date_added || '');
+      } else if (sortBy === 'last_played') {
+        cmp = (a.last_played || '').localeCompare(b.last_played || '');
+      }
+
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
   });
 
   // ── Load games & states on mount ─────────────────────────────────────────────
@@ -253,30 +296,6 @@
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
-  function formatDate(iso?: string): string {
-    if (!iso) return 'Never played';
-    try {
-      return new Intl.DateTimeFormat(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }).format(new Date(iso));
-    } catch {
-      return iso;
-    }
-  }
-
-  function formatPlaytime(seconds?: number): string {
-    if (!seconds) return 'Never played';
-    if (seconds < 60) return '< 1m played';
-    
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    
-    if (hours > 0) {
-      return `${hours}h ${mins}m played`;
-    }
-    return `${mins}m played`;
-  }
 </script>
 
 <svelte:window onclick={handleWindowClick} onscroll={handleWindowScroll} onresize={handleWindowResize} />
@@ -296,6 +315,18 @@
         <span class="sr-only">Search games by name</span>
         <input bind:value={searchQuery} type="search" placeholder="Search games" />
       </label>
+      <div class="sort-controls">
+        <select value={sortBy} onchange={handleSortByChange} class="sort-select" aria-label="Sort games by">
+          <option value="name">Name</option>
+          <option value="playtime">Most/Least Played</option>
+          <option value="date_added">Date Added</option>
+          <option value="last_played">Last Played</option>
+        </select>
+        <select bind:value={sortDirection} class="sort-select" aria-label="Sort direction">
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
+        </select>
+      </div>
       <button class="add-btn" onclick={() => (addModalOpen = true)}>
         <span>＋</span> Add Game
       </button>
@@ -476,20 +507,61 @@
   .list-actions {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .sort-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .sort-select {
+    color-scheme: dark;
+    height: 36px;
+    background: #111128;
+    border: 1px solid #28284e;
+    border-radius: 7px;
+    color: #c0c0ff;
+    padding: 0 1.8rem 0 0.7rem;
+    font-size: 0.84rem;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238080c0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+    box-sizing: border-box;
+  }
+
+  .sort-select:hover {
+    background-color: #161633;
+    border-color: #3d3d75;
+    color: #d8d8ff;
+  }
+
+  .sort-select:focus {
+    border-color: #6060e0;
+    box-shadow: 0 0 0 2px #4040c033;
   }
 
   .search-field {
     display: flex;
     align-items: center;
     gap: 0.45rem;
-    min-width: 220px;
-    padding: 0.48rem 0.7rem;
+    min-width: 180px;
+    height: 36px;
+    padding: 0 0.7rem;
     background: #111128;
-    border: 1px solid #292950;
+    border: 1px solid #28284e;
     border-radius: 7px;
     color: #7070b0;
     transition: border-color 0.15s, box-shadow 0.15s;
+    box-sizing: border-box;
   }
 
   .search-field:focus-within {
@@ -498,7 +570,7 @@
   }
 
   .search-icon {
-    font-size: 1.15rem;
+    font-size: 1.1rem;
     line-height: 1;
   }
 
@@ -509,6 +581,7 @@
     outline: 0;
     background: transparent;
     color: #d0d0ff;
+    font-size: 0.85rem;
   }
 
   .search-field input::placeholder { color: #606090; }
@@ -550,16 +623,18 @@
   .add-btn {
     background: #4040c0;
     border: 1px solid #6060e0;
-    border-radius: 8px;
+    border-radius: 7px;
     color: #fff;
-    padding: 0.55rem 1.1rem;
-    font-size: 0.88rem;
+    height: 36px;
+    padding: 0 1.0rem;
+    font-size: 0.86rem;
     font-weight: 500;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    transition: background 0.15s;
+    transition: background 0.15s, border-color 0.15s;
+    box-sizing: border-box;
   }
 
   .add-btn:hover { background: #5555d5; }

@@ -1,5 +1,6 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use chrono::Utc;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
@@ -72,7 +73,7 @@ fn validate_game_executable(game: &Game) -> Result<(), String> {
 /// Adds a new game to the persistent store.
 /// The caller is responsible for setting a unique `id` (UUID v4).
 #[tauri::command]
-pub fn add_game(app: AppHandle, game: Game) -> Result<(), String> {
+pub fn add_game(app: AppHandle, mut game: Game) -> Result<(), String> {
     validate_game_executable(&game)?;
 
     let mut games = load_games(&app)?;
@@ -80,6 +81,9 @@ pub fn add_game(app: AppHandle, game: Game) -> Result<(), String> {
     if games.iter().any(|g| g.id == game.id) {
         return Err(format!("A game with id '{}' already exists.", game.id));
     }
+
+    // Timestamp when this game was added to the library (set once at creation time)
+    game.date_added = Utc::now().to_rfc3339();
 
     games.push(game);
     save_games(&app, &games)
@@ -114,7 +118,7 @@ pub fn remove_game(app: AppHandle, id: String) -> Result<(), String> {
 /// Replaces an existing game (matched by `game.id`) with the updated struct.
 /// Returns an error if no game with that id exists.
 #[tauri::command]
-pub fn update_game(app: AppHandle, game: Game) -> Result<(), String> {
+pub fn update_game(app: AppHandle, mut game: Game) -> Result<(), String> {
     validate_game_executable(&game)?;
 
     let mut games = load_games(&app)?;
@@ -123,6 +127,9 @@ pub fn update_game(app: AppHandle, game: Game) -> Result<(), String> {
         .iter_mut()
         .find(|g| g.id == game.id)
         .ok_or_else(|| format!("No game found with id '{}'.", game.id))?;
+
+    // Preserve the original date_added value so it never changes after creation
+    game.date_added = entry.date_added.clone();
 
     *entry = game;
     save_games(&app, &games)
