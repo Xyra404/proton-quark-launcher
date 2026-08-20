@@ -1,5 +1,6 @@
 ### TODO LIST
 
-- filter by last played
-- other filters
-- add custom tags per game
+- [ ] add custom (user-defined) tags per game
+  - (by default the tag is not present)
+
+- [ ] filter by last played, playtime.

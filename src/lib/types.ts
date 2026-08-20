@@ -21,6 +21,8 @@ export interface Game {
   prefix_path?: string;
   /** Optional extra CLI arguments appended at launch */
   launch_args?: string;
+  /** ISO 8601 UTC timestamp of when the game was added to the library */
+  date_added?: string;
   /** ISO 8601 UTC timestamp of the last launch, or undefined if never played */
   last_played?: string;
   /** Total playtime in seconds */
